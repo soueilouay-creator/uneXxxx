@@ -1,10 +1,14 @@
 # Verified workflow lifecycle
 
-## Canonical sequence
+## Command-center operating sequence
 
-**Request → Plan → Execute → Verify → (Improve → Verify) ↻ → Deliver → Learn**
+**Request → Plan → Route → Authorize → Execute → Verify → Deliver & learn**
 
-The runtime applies a quality gate at each stage. The initial review must pass before refinement starts. The specialist then improves the same candidate and the independent reviewer checks each revised version. Failed post-improvement feedback is fed into the next bounded improvement round; only a passing refined candidate can be delivered.
+The Workflow Studio presents this seven-stage outer lifecycle. Route selects the appropriate v7 role profile and eligible Skills. Authorize checks capability scope, policy and required approval before an action is executed. Protected actions remain fail-closed unless the exact action has a trusted, durable, one-use approval.
+
+## Native execution quality loop
+
+Within Execute and Verify, the native specialist lifecycle runs a **bounded Improve → Verify loop**. The initial review must pass before refinement starts. The specialist then improves the same candidate and the independent reviewer checks each revised version. Failed post-improvement feedback is fed into the next bounded improvement round; only a passing refined candidate can be delivered.
 
 ## Native runtime path
 

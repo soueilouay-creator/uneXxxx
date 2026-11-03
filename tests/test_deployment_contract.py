@@ -100,5 +100,44 @@ class DeploymentContractTests(unittest.TestCase):
         self.assertTrue(upstream_license.is_file())
         self.assertIn("Apache License", upstream_license.read_text(encoding="utf-8"))
 
+
+    def test_render_blueprint_starts_without_optional_provider_secrets(self):
+        render = (ROOT / "render.yaml").read_text(encoding="utf-8")
+        self.assertIn("UNEXPECTED_DEFAULT_PROVIDER", render)
+        self.assertIn("        value: mock", render)
+        for key in ("OPENROUTER_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENOX_API_KEY"):
+            with self.subTest(key=key):
+                self.assertNotIn(key, render)
+
+
+    def test_capability_matrix_matches_current_main_registries(self):
+        agents = json.loads((ROOT / "agent_manifest.json").read_text(encoding="utf-8"))
+        skills = json.loads((ROOT / "skill_manifest.json").read_text(encoding="utf-8"))
+        workflows = json.loads((ROOT / "web" / "assets" / "workflow-catalog.json").read_text(encoding="utf-8"))
+        matrix = (ROOT / "CAPABILITY_MATRIX.md").read_text(encoding="utf-8")
+        self.assertEqual(agents["active_agent_count"], 38)
+        self.assertEqual(len(skills["skills"]), 3)
+        self.assertEqual(workflows["count"], 120)
+        self.assertIn("38 canonical role profiles", matrix)
+        self.assertIn("3 active Skills", matrix)
+        self.assertIn("120 mapped workflow candidates", matrix)
+        self.assertNotIn("draft PR #12 is not merged", matrix)
+        self.assertNotIn("v8.1 Skills branch", matrix)
+
+    def test_verified_workflow_documents_the_command_center_seven_stage_sequence(self):
+        workflow = (ROOT / "docs" / "VERIFIED_WORKFLOW.md").read_text(encoding="utf-8")
+        self.assertIn("Request → Plan → Route → Authorize → Execute → Verify → Deliver & learn", workflow)
+        self.assertIn("bounded Improve → Verify loop", workflow)
+
+    def test_deploy_runbook_documents_zero_spend_and_free_tier_limits(self):
+        deploy = (ROOT / "DEPLOY.md").read_text(encoding="utf-8")
+        self.assertIn("no render service is currently linked to this repository", deploy.lower())
+        self.assertIn("5 GB of included outbound bandwidth", deploy)
+        self.assertIn("$0.15/GB", deploy)
+        self.assertIn("ephemeral filesystem", deploy)
+        self.assertIn("6-hour restore window", deploy)
+        self.assertIn("no automatic snapshot schedule", deploy)
+        self.assertIn("do not deploy until the workspace billing guard is verified", deploy)
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

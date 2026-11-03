@@ -1,37 +1,54 @@
-# Capability Matrix — uneXpected v8.1 preview
+# Capability matrix — uneXpected Unified
 
-This matrix describes the repository implementation on the v8.1 feature branches. A CI pass is not proof of production configuration, live credentials, external service access or deployment.
+This matrix describes the public `main` source tree, not a live hosted service. It distinguishes definitions, code, runtime registration and external authorization. A successful test/build does not prove live provider access or deployment.
 
-| Capability | Runtime status | What is actually available | Boundary / not yet proven |
-|---|---|---|---|
-| Single command center | Implemented in v8 | One Python HTTP application, Coordinator, desktop web UI and one API boundary | No separate mobile app or second coordinator; hosted cutover is not implied |
-| Specialist registry | Implemented | 38 canonical role specifications | Roles are specifications, not 38 independent running models |
-| Provider routing | Adapter code present | Deterministic mock plus OpenAI-compatible, Anthropic, OpenRouter and OpenOx routes | A real route requires host secrets and a successful live smoke test; mock is not live-model evidence |
-| Skill bundles | Implemented in v8.1 Skills branch | Hash-pinned v1/v2 manifests, role mapping, automatic/manual/always modes, inert references/scripts/assets | No Skill can grant a tool or permission; draft PR #12 is not merged |
-| SQLite state | Implemented | Local tasks, event log, capabilities, memory, idempotency and task lineage | Local filesystem persistence is not equivalent to durable hosted backups |
-| PostgreSQL state | Adapter and integration tests implemented | Hosted shared state adapter, migrations and task-lineage persistence | Production backup, restore, failover and live environment configuration require separate verification |
-| Task event cursors | Implemented in v8.1 branch | Authenticated event cursor API for SQLite/PostgreSQL plus a basic command-center task trace panel | No live streaming or detailed provider token/cost view; no task is re-executed on reconnect |
-| MCP adapter boundary | Implemented in v8.1 branch | In-process descriptor/adapter contract, capability provenance matching, role scope, permission checks, bounded inputs/results and timeout handling | No remote MCP transport, server discovery, third-party server connection or external tool is configured; privileged MCP tools are blocked pending durable approval/replay proof; timeout cancellation is cooperative; CI uses fake adapters |
-| Subagent delegation | Implemented in v8.1 branch | Up to 3 sequential child runs, depth limit, 4 steps per child, isolated supplied inputs, parent lineage and bounded summaries | No parallel child execution, automatic retry, background child queue or inherited privileged approval |
-| Shared knowledge | Implemented foundation | Reviewed, provenance-tagged knowledge records | Document upload, chunking, vector indexing and full RAG retrieval are not implemented |
-| Web/current-source research inside runtime | Not configured | External ChatGPT tools may be available outside this runtime | Web/current-source search is not wired into this runtime; external ChatGPT tools are not implicitly available to uneXpected |
-| Browser actions / third-party connectors | Not configured | MCP adapter boundary can host reviewed adapters | No live browser, CRM, mail, GitHub write or other external connector is authorized by this branch |
-| Code execution | Not granted to agents | Runtime tests and Python package code run in CI/host environment | No agent-facing arbitrary code interpreter or separate sandbox service |
-| Scheduler / notifications | Not configured | No always-on scheduler shipped | Recurring tasks remain disabled until durable leases, approval/replay and recovery are proven |
-| Image/video/audio generation | Not configured inside runtime | Workflow planning and reviewed Skills can describe production | No external rendering provider is connected by this runtime |
-| Consequential actions | Denied by default | Permission policy and action-bound approval verifier interfaces exist | No publish, payment, external message, account change, destructive write or deployment is activated by these changes |
-| Quality evaluation | Implemented foundation | Fixed offline regression and quality scenario contracts | Offline mock tests do not establish live-model quality |
-| Self-improvement | Governed proposal foundation | Versioned proposals, fingerprints, evaluation and rollback concepts | Protected changes require human review; no silent self-modification |
+## Registry and command center
 
-## v8.1 CI evidence
+| Capability | Repository status | Verified scope / boundary |
+|---|---|---|
+| Unified command center | Implemented | One Python HTTP application, one Coordinator, one API boundary and one desktop web UI. No second gateway process or phone/PWA application. |
+| Specialist agents | 38 canonical role profiles | Imported v7 registry; roles are runtime-selected specifications, not 38 independent model servers. |
+| Skills | 3 active Skills | Hash-pinned manifest, role scope, invocation modes and content digests. Skill instructions do not grant permissions or install tools. |
+| Workflow Studio | Implemented | Seven-stage command-center lifecycle, searchable/filterable workflow catalogue and recent task records with links to persisted traces. |
+| Workflow catalogue | 120 mapped workflow candidates | Imported from the v6→v7 crosswalk with source provenance, role mappings, inputs, procedures, deliverables and acceptance checks. All are explicitly **mapped, not runnable** until separately implemented and tested. |
+| Live task traces | Implemented | Authenticated event-cursor reads and UI trace access read persisted events; reconnecting never re-executes a task. |
+| Subagent delegation | Implemented, bounded | Up to 3 sequential child tasks, bounded depth/steps/deadlines and isolated supplied inputs. No parallel child queue or inherited privileged approval. |
 
-The v8.1 feature branch is tested through GitHub Actions, including Python compilation, resource/quality contract validation, PostgreSQL migrations, the regression/security suite, single-process Docker image build, container smoke tests and CLI smoke tests. Only completed successful workflow runs count as CI evidence. They do not prove Render deployment or live external integration readiness.
+## Runtime and integration boundaries
+
+| Capability | Repository status | What remains unverified or unavailable |
+|---|---|---|
+| Provider adapters | Code implemented | Mock, OpenAI, Anthropic, OpenRouter and OpenOx adapters are present. The Blueprint defaults to mock. No live provider credentials or live model invocation have been verified for a new service. |
+| PostgreSQL state | Adapter and migrations implemented | Migration 001 defines the baseline; migration 002 adds transactional idempotency claims. The connected Neon Free project's default branch currently reports schema versions 1 and 2, but no Render service is connected to it. |
+| SQLite state | Local development only | Render Free web services have ephemeral filesystems; do not use SQLite as hosted durable state. |
+| Approval verifier | Code implemented, inactive | GitHub PR-review verifier and PostgreSQL one-use ledger exist. Its token, repository allowlist and trusted reviewer configuration are not present in a deployed service. |
+| Replay protection | PostgreSQL adapter and tests implemented | Durable idempotency claims are schema-backed; a hosted end-to-end deployment/restart/replay test remains outstanding. |
+| Consequential actions | Denied by default | Publishing, payments, external messages, account changes, destructive writes and protected deployments remain disabled until the trusted approval and recovery controls are verified. |
+| MCP adapter boundary | Implemented in-process | `GET /v1/mcp/tools` lists only registered adapters. The current registration count is zero; no remote MCP transport, server discovery or third-party MCP server is connected. |
+| Research and browsing | Not wired into runtime | The resource catalogue is a provenance-aware discovery index. Web/current-source search is not wired into this runtime; ChatGPT web/search tools do not automatically become uneXpected runtime tools. |
+| Browser, CRM, email and external connectors | Not configured | No connector is registered or authorized in the new runtime. |
+| Scheduler and background workers | Not configured | No always-on scheduler, queue worker or autonomous recurring action is deployed. |
+| Image, video, voice and music generation | Planning only inside this runtime | External generation services are not connected or authorized by the new deployment. |
+| Quality evaluation | Offline contract and regression foundation | CI tests deterministic fixtures. They are not live-model quality measurements. |
+| Self-improvement | Governed proposal foundation | Outcomes and proposals are recorded; protected changes require benchmarks, human review and rollback. No silent self-modification. |
+
+## Hosting and recovery status
+
+- The Render Blueprint defines one Free Docker web service with `autoDeploy: false`, `/health` and mock provider mode.
+- As inspected on 2026-11-03, **no Render service is currently linked to this repository**. The existing Render services still point to older repositories and were left unchanged.
+- The connected Neon project is on its Free plan. Its default branch has schema versions 1 and 2, and a manual pre-migration snapshot exists.
+- The Neon project's current history-retention setting is 6 hours. The snapshot schedule is empty; no automatic snapshot schedule or independent export destination was verified.
+- A live Render deploy, live provider call, external MCP registration, full restore rehearsal from the stored snapshot, and end-to-end trusted-approval verification are not claimed.
+
+## CI evidence
+
+The verified `main` commit `67d2587af7eee08e14c8c80acfeacff897170f0b` passed GitHub Actions run [41640135070](https://github.com/soueilouay-creator/uneXxxx/actions/runs/41640135070): 258 tests ran, then the Docker image built, the actual container booted and passed API smoke checks, and CLI smoke tests passed. One optional historical archive fixture was skipped because that archive was not present. This evidence applies to that exact source commit, not to Render deployment or live integrations.
 
 ## Operating rules
 
-1. A catalog record is not an installed or authorized adapter.
-2. An adapter can execute only when its capability is reviewed, installed, enabled and verified against its pinned provenance.
-3. Tool calls are role-scoped, permission-checked, bounded and audited; timeout is not a retry signal.
-4. Subagents receive only explicitly supplied data and have independent task IDs and role memory namespaces.
-5. Event cursors read persisted history and never replay the original action.
-6. No consequential execution is enabled by this capability matrix.
+1. A role, Skill, workflow record or capability descriptor is not proof of a running worker or installed integration.
+2. A tool can execute only after provenance, role scope, capability status and permissions have been verified.
+3. Approval must be bound to the exact action digest and consumed once in durable storage.
+4. A timeout is not a retry signal; retries and delegation remain bounded.
+5. Mock mode is not live AI-provider evidence.
+6. No hosted service, external connector or consequential execution is considered active until its live state is independently verified.

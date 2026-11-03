@@ -141,6 +141,10 @@ python -m unittest discover -s tests -v
 
 The deployment contract tests assert one Python process, one Render web service, a `/health` check, PostgreSQL fail-closed behavior, and no phone/PWA assets in the v8 web tree.
 
+## Zero-spend hosting status
+
+The hosted deployment is not active yet. The Render Blueprint is Free-tier and mock-provider-only, but Render's Free outbound bandwidth and build quotas can incur overage charges when a payment method is attached. See [DEPLOY.md](DEPLOY.md) for the current $0 deployment gate, Neon Free limits, actual hosting state and safe apply/verification sequence. No paid model provider is enabled by default.
+
 ## Migration and rollback
 
 The original AI Studio repository and both old Render services remain untouched during migration. The v8 service must pass preview, provider, database, lifecycle, backup/restore and rollback checks before cutover. Retiring either old service is a separate operation requiring explicit final confirmation.

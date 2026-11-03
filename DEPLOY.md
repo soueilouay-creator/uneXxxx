@@ -1,71 +1,73 @@
-# uneXpected v8 deployment — one Python command center
+# uneXpected Unified — zero-spend deployment readiness
 
-## Target topology
+## Current verified state (2026-11-03)
 
-- One Render Docker web service.
-- One Python application process.
-- One public HTTP server and one bearer-token API boundary.
-- One Coordinator and 38-role registry.
-- One PostgreSQL database for hosted shared state.
-- Desktop web assets served by the same Python process.
-- No Node gateway, second runtime service, child HTTP process or phone/PWA app.
+- Public source: [soueilouay-creator/uneXxxx](https://github.com/soueilouay-creator/uneXxxx), default branch `main`.
+- Runtime: one Python command center, 38 role profiles, 3 active Skills and 120 mapped workflow candidates.
+- The checked-in `render.yaml` defines one Free Docker web service in Frankfurt, with `autoDeploy: false` and `/health`.
+- **No Render service is currently linked to this repository.** The four existing services in the connected workspace still point to older repositories; they were not changed.
+- The existing Neon project `unexpected-v8-unified` is on the Free plan. Its default `main` branch has migration versions 1 and 2. A manual snapshot named `uneXpected-pre-v8-migration-2026-11-03` was created before the migration. The snapshot schedule is empty.
+- No live provider key, live model call, remote MCP server, external connector, or trusted GitHub approval verifier is configured for a new Render service.
 
-The checked-in `render.yaml` is a preview Blueprint with `plan: free` and `autoDeploy: false`. It creates only the web service; it does not create a database or paid resource.
+## $0 deployment contract
 
-## Before deploying
+**Do not create or deploy a service until the Render workspace billing guard has been checked and it is confirmed that usage cannot create a charge.** This is a deliberate safeguard for the no-spend requirement, not a code limitation.
 
-1. Run the full test suite and inspect the source-integrity manifest.
-2. Confirm the selected Neon project is on a $0 plan and within its current compute, storage and transfer limits.
-3. Create an isolated Neon branch from the intended source branch.
-4. For a fresh database, apply `migrations/001_initial.sql` then `migrations/002_idempotency_claims.sql`. For an existing schema-v1 database, verify it matches migration 001 and apply only migration 002. v8 requires schema version 2 and `idempotency_claims`.
-5. Verify the Postgres state adapter, idempotency claims, approval one-use ledger, and a backup/restore path.
-6. Do not use the original Neon parent branch for migration experiments.
+The current Render Free/Hobby documentation describes:
 
-## Render environment
+- 750 Free instance-hours per workspace per calendar month, shared across its Free services.
+- 5 GB of included outbound bandwidth and 500 build-pipeline minutes for a Hobby workspace.
+- A Free web service spins down after 15 minutes without inbound traffic and its filesystem is ephemeral; local changes are lost on restart, redeploy or spin-down.
+- Outbound bandwidth beyond the included amount is currently listed at **$0.15/GB**. With a payment method, overages can be billed; without one, Render suspends Free services instead. The connected Render tools cannot inspect or set the account's billing payment method or spend limit, so a $0 total charge cannot yet be guaranteed.
 
-Set these values in Render's private environment settings:
+Official sources:
+- [Render Free instances and limits](https://render.com/docs/free)
+- [Render outbound bandwidth pricing and billing](https://render.com/docs/outbound-bandwidth)
+- [Render Blueprint environment variables](https://render.com/docs/blueprint-spec)
+- [Render environment variables and secrets](https://render.com/docs/configure-environment-variables)
 
-| Variable | Value |
+The existing Neon Free project currently reports a 1 GB logical-storage limit and 100 CU-hours per project per month; its configured instant-restore history is 6 hours. Scheduled Neon snapshots are available only on paid plans according to Neon's published snapshot guidance. The manual snapshot listed above is not a recurring backup.
+
+Official sources:
+- [Neon Free plan update (1 GB per project)](https://neon.com/blog/neon-free-plan-1-gb-per-project)
+- [Neon snapshot scheduling and paid-plan availability](https://neon.com/blog/three-ways-to-use-your-snapshots)
+- [Neon branching and restore-window guidance](https://neon.com/blog/practical-guide-to-database-branching)
+
+## Blueprint configuration
+
+The initial Blueprint intentionally includes only non-provider settings:
+
+| Variable | Initial value / purpose |
 |---|---|
-| `UNEXPECTED_STORAGE_BACKEND` | `postgres` |
+| `UNEXPECTED_STORAGE_BACKEND` | `postgres`; no hosted SQLite fallback |
 | `UNEXPECTED_APPROVAL_LEDGER_BACKEND` | `postgres` |
-| `DATABASE_URL` | Pooled connection string for the isolated/approved Neon branch |
-| `UNEXPECTED_RUNTIME_API_TOKEN` | Generated by Render or securely generated out of band |
-| `UNEXPECTED_DEFAULT_PROVIDER` | `mock` until a live provider is deliberately tested |
+| `DATABASE_URL` | `sync: false`; set privately to the existing Neon `main` connection string |
+| `UNEXPECTED_RUNTIME_API_TOKEN` | `generateValue: true`; Render generates the bearer token |
+| `UNEXPECTED_DEFAULT_PROVIDER` | `mock`; no paid model calls are made |
 | `UNEXPECTED_MAX_WORKERS` | `4` |
 | `UNEXPECTED_MAX_RETRIES` | `1` |
-| `UNEXPECTED_STATE_DIR` | `/tmp/uneXpected-state` |
+| `UNEXPECTED_STATE_DIR` | `/tmp/uneXpected-state`; hosted durable state is PostgreSQL |
 
-Provider secrets are optional and should be added only in Render's private environment settings. Never paste credentials into GitHub files, browser code, logs, chat or screenshots.
+Optional provider keys are deliberately absent from the initial Blueprint. Do not configure OpenAI, Anthropic, OpenRouter or OpenOx until a separately confirmed no-cost/free-credit path exists. An adapter in source code is not permission to incur usage charges.
 
-## Deploy and verify
+The GitHub approval verifier also remains unconfigured: its read-only token, exact repository allowlist and trusted reviewer identities are not set. The application must continue to report privileged execution as fail-closed.
 
-1. Create a preview service from `feat/unified-v8-foundation` using the checked-in Blueprint.
-2. Keep auto-deploy disabled until the image and database settings have been reviewed.
-3. Deploy the Docker image. The container starts exactly one Python application process.
-4. Confirm `GET /health` returns HTTP 200 with `ok: true` and storage ready.
-5. Enter the generated bearer token in the command center. The token remains in tab memory and is not persisted by the UI.
-6. Verify authenticated `/v1/status`, all 38 agents, task history, provider inventory, capabilities, approvals, audit and improvement proposals.
-7. Run one deterministic full lifecycle and inspect persisted task/event records.
-8. Only after provider credentials are deliberately configured, run one low-cost provider connection test and one owner-approved low-risk invocation. Confirm actual provider/model provenance.
-9. Run duplicate concurrent idempotency requests and confirm one execution and one replay result.
-10. Verify approval consumption, altered-digest rejection, replay rejection, database export, restore into a disposable branch and recovery of approval-consumption state.
+## Apply only after the billing guard is confirmed
 
-## Approval and write safety
+1. In the Render Dashboard, confirm the workspace's current billing state, payment-method status, included usage and spend-limit behavior. Keep the workspace on its Free/Hobby tier.
+2. If the dashboard cannot guarantee no charges beyond included usage, do not apply the Blueprint.
+3. Open the [Render Blueprint creation page](https://dashboard.render.com/blueprint/new?repo=https://github.com/soueilouay-creator/uneXxxx) and review the single Free web service.
+4. During initial creation, enter the Neon `main` connection string into the private `DATABASE_URL` prompt; keep the generated runtime API token private.
+5. Verify the selected commit is on `main`, keep automatic deployment disabled, and apply only the Free web service. The Blueprint does not create another database.
+6. Wait for the deploy to reach `live`; then verify `GET /health` reports storage readiness and `GET /` serves the command center.
+7. In the UI, use the generated bearer token from Render's private environment settings. Verify authenticated status, 38 roles, 3 Skills, 120 mapped workflow candidates, registered tool count (currently 0), a mock invocation, persisted task events and task trace access.
+8. Recheck service metrics and workspace included usage. Stop if a threshold could trigger a charge.
 
-No deployment setting in this Blueprint enables consequential execution. The GitHub approval verifier remains inactive unless its repository allowlist, read-only token and trusted reviewer settings are deliberately configured. Even when configured, activation is blocked until durable transactional approval, replay, backup and restore checks pass.
+## Rollback and safety
 
-Do not enable autonomous publishing, spending, payments, external messages, account changes, deployment writes or other consequential actions during the preview phase.
-
-## Rollback and cutover
-
-- Keep `unexpected-ai-studio` and `unexpected-v731-runtime-test` running during the preview.
-- Do not change their environment settings, branches, tokens, health checks or databases as part of this preview.
-- If v8 fails, stop the preview service and leave the existing services unchanged.
-- Rehearse rollback before any DNS/service cutover.
-- Cutover is separate from service retirement.
-- Obtain explicit final confirmation before deleting either old Render service or removing its data.
-
-## Known $0-plan limitation
-
-Neon Free has no scheduled snapshot backups. A tested branch restore or manual export/restore must be part of the recovery plan. Do not treat a healthy connection or a successful migration as proof of durable backups.
+- Keep all four existing Render services unchanged until the new service has passed the full hosted checks.
+- The Free Render filesystem is ephemeral. Hosted task, event, approval and idempotency state must use PostgreSQL; never switch the new hosted service to SQLite.
+- No automatic snapshot schedule is configured on the current Neon Free plan. Keep the manual pre-migration snapshot and do not claim continuous backup coverage.
+- A complete backup and restore test to a disposable branch is still required before treating the deployment as production-ready.
+- Consequential actions remain disabled until the trusted verifier, durable one-use approval ledger, idempotency/replay checks, backup and restore tests all pass. Do not enable publishing, payments, messages, account changes, destructive writes or autonomous deployment.
+- Retire the older services only after the new one is verified and a separate rollback/cutover review is complete.

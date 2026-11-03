@@ -289,3 +289,19 @@ class CommandCenterAPITests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+    def test_workflow_studio_and_skills_views_are_exposed(self):
+        status, html = self.request("GET", "/")
+        self.assertEqual(status, 200)
+        self.assertIn('data-view="workflows"', html)
+        self.assertIn('data-view="skills"', html)
+        self.assertIn('id="workflow-grid"', html)
+        self.assertIn('id="skill-grid"', html)
+
+    def test_workflow_catalogue_contains_all_120_mapped_records(self):
+        status, body = self.request("GET", "/assets/workflow-catalog.json")
+        self.assertEqual(status, 200)
+        self.assertEqual(body["count"], 120)
+        self.assertEqual(body["status"], "mapped_candidates_not_runnable")
+        self.assertEqual(len(body["workflows"]), 120)
+

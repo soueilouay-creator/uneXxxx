@@ -4,7 +4,7 @@ services:
     runtime: docker
     plan: free
     region: frankfurt
-    branch: unified-v1
+    branch: main
     dockerfilePath: ./Dockerfile
     dockerContext: .
     healthCheckPath: /health
@@ -20,10 +20,25 @@ services:
         generateValue: true
       - key: UNEXPECTED_DEFAULT_PROVIDER
         value: mock
+      # Existing-service updates do not prompt for new sync:false values; add each provider key manually in the service private Environment settings before provider-specific smoke tests.
       - key: OPENROUTER_API_KEY
         sync: false
       - key: OPENROUTER_MODEL
         value: openrouter/free
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-4.1-mini
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: ANTHROPIC_MODEL
+        value: claude-sonnet-4-5-20250929
+      - key: OPENOX_API_KEY
+        sync: false
+      - key: OPENOX_BASE_URL
+        value: https://api.openoxai.com/v1
+      - key: OPENOX_MODEL
+        value: gpt-6-astra
       - key: UNEXPECTED_MAX_WORKERS
         value: "4"
       - key: UNEXPECTED_MAX_RETRIES

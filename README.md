@@ -7,12 +7,13 @@ uneXpected v8 is one governed Python application with one desktop web command ce
 ## What is included
 
 - One Python HTTP application and one public API boundary.
-- A desktop-first command center for system health, agents, tasks, lifecycle history, providers, capabilities, approvals, audit, and improvement proposals.
+- A desktop-first command center for system health, agents, tasks, the visual Workflow Studio, Skills & tools, providers, capabilities, approvals, audit, and improvement proposals.
+- A searchable catalogue of 120 v6→v7 workflow candidates, with role mappings, source provenance, procedure steps, deliverables and acceptance checks. Candidate records are not treated as runnable deployments.
 - The canonical 38 specialist roles and a hash-pinned Skill bundle registry with backward-compatible v1/v2 manifests.
-- The governed coordinator and seven-stage workflow: Request → Plan → Execute → Verify → Improve → Deliver → Learn.
+- The governed coordinator and seven-stage workflow: Request → Plan → Route → Authorize → Execute → Verify → Deliver & learn.
 - Resource Intelligence: permanent Awesome research index with provenance, independent license/security status and discovery-only adoption states.
 - AI Quality Evaluation: bounded deterministic output checks for instruction following, prompt injection, grounding, safety, structured output and regressions.
-- Native server-side provider adapters for OpenAI, Anthropic, and OpenRouter, plus explicit deterministic mock mode.
+- Native server-side provider adapters for OpenAI, Anthropic, OpenRouter and the OpenOx Responses API, plus explicit deterministic mock mode. Provider credentials remain server-side and live routes require a successful connection check.
 - SQLite for local development and PostgreSQL for hosted shared state.
 - Single-flight idempotency claims, replay detection, and a PostgreSQL one-use approval ledger.
 - Additive database migrations and an explicit no-fallback rule for hosted PostgreSQL.
@@ -144,8 +145,16 @@ The deployment contract tests assert one Python process, one Render web service,
 
 The original AI Studio repository and both old Render services remain untouched during migration. The v8 service must pass preview, provider, database, lifecycle, backup/restore and rollback checks before cutover. Retiring either old service is a separate operation requiring explicit final confirmation.
 
+## Workflow Studio and open-source adaptation
+
+The command center exposes the runtime lifecycle and a searchable v6→v7 workflow crosswalk. The 120 crosswalk records are clearly labelled mapped candidates until an executable implementation passes workflow tests. Skills are loaded from the hash-pinned manifest and filtered by canonical role. MCP tools appear only when an adapter is registered and provenance-verified. Architecture references and source-specific license notes are in `docs/OPEN_SOURCE_ADAPTATION_REGISTER.md` and `THIRD_PARTY_NOTICES.md`.
+
 ## Resource Intelligence and AI quality
 
 The versioned catalog in `unexpected_runtime/data/resource_catalog.json` indexes [sindresorhus/awesome](https://github.com/sindresorhus/awesome) as a permanent discovery source. Linked repositories are separate candidates: their license, maintenance, dependencies and security posture are not inherited from the list. Catalog states distinguish discovered, triaged, verified, approved and integrated. No catalog read installs or authorizes a tool.
 
 The authenticated command center exposes `GET /v1/resources`, `GET /v1/quality-evaluations` and the owner-initiated `POST /v1/quality-evaluations`. The CLI exposes `resources` and `quality-eval`. Quality runs are bounded to the versioned scenario set, use only a configured and verified non-mock provider, and request no privileged permissions. Reports retain case outcomes and output digests rather than duplicating raw output. Fixture/offline CI tests are labelled separately from live provider runs. There is no background catalog crawler, package installer, LLM-as-judge or automatic improvement promotion.
+
+## License and public adaptation
+
+Project-owned uneXpected source code and documentation are licensed under the [MIT License](LICENSE) to support reuse and adaptation. Third-party material is not relicensed by that grant: see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and the preserved license files under `third_party/licenses/`. Upstream names, trademarks, logos and artwork remain with their respective owners.

@@ -286,6 +286,66 @@ class CommandCenterAPITests(unittest.TestCase):
         self.assertIn('/v1/quality-evaluations', js)
 
 
+    def test_workflow_studio_and_skills_views_are_exposed(self):
+        status, html = self.request("GET", "/")
+        self.assertEqual(status, 200)
+        self.assertIn('data-view="workflows"', html)
+        self.assertIn('data-view="skills"', html)
+        self.assertIn('id="workflow-grid"', html)
+        self.assertIn('id="skill-grid"', html)
+
+    def test_workflow_catalogue_contains_all_120_mapped_records(self):
+        status, body = self.request("GET", "/assets/workflow-catalog.json")
+        self.assertEqual(status, 200)
+        self.assertEqual(body["count"], 120)
+        self.assertEqual(body["status"], "mapped_candidates_not_runnable")
+        self.assertEqual(len(body["workflows"]), 120)
+        self.assertTrue(all(item["disposition"] == "merged-as-workflow-capability-not-separate-agent"
+                            for item in body["workflows"]))
+
+    def test_skills_and_mcp_tools_are_authenticated_live_runtime_catalogues(self):
+        self.assertEqual(self.request("GET", "/v1/skills")[0], 401)
+        self.assertEqual(self.request("GET", "/v1/mcp/tools")[0], 401)
+        status, skills = self.request("GET", "/v1/skills", token=self.token)
+        self.assertEqual(status, 200)
+        self.assertEqual(skills["count"], 3)
+        self.assertTrue(all(item["status"] == "active" for item in skills["items"]))
+        self.assertTrue(all("trigger_terms" in item for item in skills["items"]))
+        tools_status, tools = self.request("GET", "/v1/mcp/tools", token=self.token)
+        self.assertEqual(tools_status, 200)
+        self.assertEqual(tools["items"], [])
+
+
+    def test_optional_inventory_failures_cannot_block_core_refresh(self):
+        source = (ROOT / "web" / "assets" / "app.js").read_text(encoding="utf-8")
+        start = source.index("async function refresh()")
+        end = source.index("function showView", start)
+        refresh_source = source[start:end]
+        core_start = refresh_source.index("const [status,agents")
+        core_end = refresh_source.index("]);", core_start)
+        core_requests = refresh_source[core_start:core_end]
+        self.assertNotIn('/v1/skills', core_requests)
+        self.assertNotIn('/v1/mcp/tools', core_requests)
+        self.assertNotIn('/assets/workflow-catalog.json', core_requests)
+        self.assertIn("Promise.allSettled", source)
+        self.assertIn("state.inventoryErrors.workflowCatalog", source)
+        self.assertIn("state.inventoryErrors.skills", source)
+        self.assertIn("state.inventoryErrors.mcpTools", source)
+
+
+
+
+    def test_workflow_studio_renders_runtime_task_activity(self):
+        status, html = self.request("GET", "/")
+        js_status, js = self.request("GET", "/assets/app.js")
+        self.assertEqual(status, 200)
+        self.assertEqual(js_status, 200)
+        self.assertIn('id="workflow-run-list"', html)
+        self.assertIn('id="workflow-run-count"', html)
+        self.assertIn("function renderLiveWorkflowRuns()", js)
+        self.assertIn("data-workflow-trace", js)
+        self.assertIn("loadTaskTrace(button.dataset.workflowTrace", js)
+        self.assertIn('$("workflow-run-list").addEventListener("click"', js)
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

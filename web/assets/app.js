@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  const state = { token: "", agents: [], providers: [], status: null, traceTaskId: null, traceCursor: 0 };
+  const state = { token: "", agents: [], providers: [], tasks: [], skills: [], mcpTools: [], capabilities: [], workflowCatalog: null, inventoryErrors: {}, inventoryRequestId: 0, status: null, traceTaskId: null, traceCursor: 0 };
   const $ = (id) => document.getElementById(id);
   const esc = (v) => String(v ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   const time = (v) => { if (!v) return "—"; const n=Number(v); const d=new Date(n>1e12?n:n*1000); return Number.isNaN(d.getTime())?String(v):d.toLocaleString(); };
@@ -96,6 +96,76 @@
       : "Full verified lifecycle (requires a live AI provider)";
     if(!hasConfiguredLiveProvider&&$("task-mode").value==="lifecycle")$("task-mode").value="invoke";
   }
+
+  function renderLiveWorkflowRuns() {
+    const runs=state.tasks||[];
+    $("workflow-run-count").textContent=String(runs.length);
+    $("workflow-run-list").innerHTML=runs.length?runs.map(task=>{
+      const trace='<button class="button secondary trace-task" data-workflow-trace="'+esc(task.task_id)+'" type="button">View trace</button>';
+      const status='<span class="state '+(task.status==="completed"?"ok":"")+'">'+esc(task.status||"unknown")+'</span>';
+      const detail=esc(task.agent_id||"unassigned")+(task.parent_task_id?" · child of "+esc(task.parent_task_id):"")+" · "+esc(time(task.created_at));
+      return '<div class="list-row"><div><div class="list-title">'+esc(task.objective||task.task_id)+'</div><div class="list-detail">'+detail+'</div></div><div class="list-meta">'+status+trace+'</div></div>';
+    }).join(""):'<div class="empty">No workflow runs recorded yet. Submit a task from the command center to see its runtime trace here.</div>';
+  }
+  function renderWorkflowFilters(){
+    const rows=(state.workflowCatalog||{}).workflows||[],categories=[...new Set(rows.map(x=>x.category).filter(Boolean))].sort(),roles=[...new Set(rows.flatMap(x=>[x.primary_agent_id,...(x.supporting_agent_ids||[])].filter(Boolean)))].sort();
+    const c=$("workflow-category"),r=$("workflow-role"),oldC=c.value,oldR=r.value;
+    c.innerHTML='<option value="">All categories ('+categories.length+')</option>'+categories.map(x=>'<option value="'+esc(x)+'">'+esc(x)+'</option>').join("");
+    r.innerHTML='<option value="">All mapped roles ('+roles.length+')</option>'+roles.map(x=>'<option value="'+esc(x)+'">'+esc(x)+'</option>').join("");
+    if(categories.includes(oldC))c.value=oldC;if(roles.includes(oldR))r.value=oldR;
+  }
+  function renderWorkflowCatalogue(){
+    const catalog=state.workflowCatalog||{},rows=catalog.workflows||[],q=$("workflow-search").value.trim().toLowerCase(),cat=$("workflow-category").value,role=$("workflow-role").value;
+    if(state.inventoryErrors.workflowCatalog){
+      $("workflow-total").textContent="—";$("workflow-nav-count").textContent="!";$("workflow-filter-count").textContent="Catalogue unavailable";
+      $("workflow-catalog-status").textContent="Catalogue unavailable";
+      $("workflow-grid").innerHTML='<div class="empty">Workflow catalogue unavailable: '+esc(state.inventoryErrors.workflowCatalog)+'</div>';
+      return;
+    }
+    const selected=rows.filter(x=>{const text=[x.title,x.description,x.category,x.source_path,x.primary_agent_id,...(x.supporting_agent_ids||[])].join(" ").toLowerCase(),mapped=[x.primary_agent_id,...(x.supporting_agent_ids||[])];return(!q||text.includes(q))&&(!cat||x.category===cat)&&(!role||mapped.includes(role));});
+    $("workflow-total").textContent=rows.length;$("workflow-nav-count").textContent=rows.length;$("workflow-filter-count").textContent=selected.length+" of "+rows.length+" mapped candidates";
+    $("workflow-catalog-status").textContent=catalog.status==="mapped_candidates_not_runnable"?"Crosswalk loaded · mapped only":"Catalogue status unknown";
+    $("workflow-grid").innerHTML=selected.length?selected.map(x=>{
+      const list=a=>(a||[]).map(v=>"<li>"+esc(v)+"</li>").join(""),source=String(x.source_url||""),link=source.startsWith("https://")?'<a href="'+esc(source)+'" target="_blank" rel="noopener noreferrer">Open source reference ↗</a>':"Source reference unavailable";
+      return '<article class="workflow-card"><div class="workflow-card-top"><span class="category-tag">'+esc(x.category||"Uncategorised")+'</span><span class="state warning">Mapped · not runnable</span></div><h4>'+esc(x.title)+'</h4><p>'+esc(x.description||"No description supplied.")+'</p><div class="workflow-role-map"><div><small>PRIMARY ROLE</small><b>'+esc(x.primary_agent_id||"unmapped")+'</b></div><div><small>SUPPORTING ROLES</small><b>'+((x.supporting_agent_ids||[]).map(esc).join(", ")||"None")+'</b></div></div><details><summary>Inputs, procedure, deliverable & acceptance</summary><div class="workflow-detail"><b>Required inputs</b><ul>'+list(x.required_inputs)+'</ul><b>Procedure</b><ol>'+list(x.procedure_steps)+'</ol><b>Expected deliverable</b><p>'+esc(x.expected_deliverable||"Not specified")+'</p><b>Acceptance checks</b><ul>'+list(x.acceptance_checks)+'</ul><b>Safety boundary</b><p>'+esc(x.safety_boundary||"No additional safety metadata supplied")+'</p><b>External dependencies</b><p>'+esc(x.external_dependencies||"Not specified")+'</p><div>'+link+'</div><small>Source path: '+esc(x.source_path||"—")+' · Card: '+esc(x.card_path||"—")+'</small></div></details></article>';
+    }).join(""):'<div class="empty">No workflow candidates match these filters.</div>';
+  }
+  function renderSkillsAndTools(){
+    const list=state.skills||[],tools=state.mcpTools||[],caps=state.capabilities||[];
+    $("skill-total").textContent=state.inventoryErrors.skills?"—":list.length;
+    $("skill-nav-count").textContent=state.inventoryErrors.skills?"!":list.length;
+    $("mcp-tool-total").textContent=state.inventoryErrors.mcpTools?"—":tools.length;
+    $("skill-grid").innerHTML=state.inventoryErrors.skills?'<div class="empty">Skills unavailable: '+esc(state.inventoryErrors.skills)+'</div>':list.length?list.map(s=>{
+      const roles=(s.agent_ids||[]).map(esc).join(", "),triggers=(s.trigger_terms||[]).map(esc).join(", ")||"Runtime policy",allowed=(s.allowed_tools||[]).map(esc).join(", ")||"No direct tool grants",resources=(s.resources||[]).map(x=>esc(x.kind)+": "+esc(x.path)).join(" · ")||"No additional resources";
+      return '<article class="skill-card"><div class="workflow-card-top"><span class="category-tag">Skill v'+esc(s.version)+'</span><span class="state '+(s.status==="active"?"ok":"")+'">'+esc(s.status)+'</span></div><h4>'+esc(s.id)+'</h4><p>'+esc(s.description||"Hash-pinned reusable specialist procedure.")+'</p><div class="skill-meta"><div><small>INVOCATION MODE</small><b>'+esc(s.invocation_mode)+'</b></div><div><small>ALLOWED TOOLS</small><b>'+allowed+'</b></div></div><b>Mapped roles</b><p>'+roles+'</p><b>Activation triggers</b><p>'+triggers+'</p><b>Bundle files</b><p>'+resources+'</p><small class="hash-line">SHA-256 '+esc(s.sha256)+'<br>Source: '+esc(s.source_ref)+'</small></article>';
+    }).join(""):'<div class="empty">No active Skills are available from the verified manifest.</div>';
+    const manual=list.filter(x=>x.invocation_mode==="user_invocable").length;
+    $("skill-policy-note").innerHTML='<b>Skill activation policy</b><p>'+manual+' of '+list.length+' active Skills are explicitly user-invocable. Automatic Skills are selected by the runtime using the objective triggers and role scope. Skills do not independently grant permissions. The loader verifies SHA-256 content and does not execute packaged scripts.</p>';
+    $("mcp-tool-grid").innerHTML=state.inventoryErrors.mcpTools?'<div class="empty">MCP tool inventory unavailable: '+esc(state.inventoryErrors.mcpTools)+'</div>':tools.length?tools.map(t=>'<article class="tool-card"><div class="workflow-card-top"><span class="category-tag">MCP adapter</span><span class="state '+(t.enabled?"ok":"")+'">'+esc(t.capability_status)+'</span></div><h4>'+esc(t.name)+'</h4><p>'+esc(t.description)+'</p><div class="skill-meta"><div><small>TOOL ID</small><b>'+esc(t.tool_id)+'</b></div><div><small>CAPABILITY</small><b>'+esc(t.capability_id)+'</b></div></div><b>Allowed roles</b><p>'+((t.allowed_agent_ids||[]).map(esc).join(", ")||"None")+'</p><b>Required permissions</b><p>'+((t.required_permissions||[]).map(esc).join(", ")||"None")+'</p><small>Source: '+esc(t.source_url)+' · '+esc(t.source_publisher)+' · v'+esc(t.version)+'</small></article>').join(""):'<article class="panel empty"><b>No MCP adapters registered</b><p>The MCP gateway boundary is implemented, but no external MCP server or tool adapter is installed, enabled or authorised. The current count is zero, not simulated.</p></article>';
+    $("skills-capability-list").innerHTML=caps.length?caps.map(x=>row(x.name||x.capability_id,x.description||x.source_url||"",x.status||"unknown")).join(""):'<div class="empty">No capabilities are registered. Additions require provenance, licence, role scope and permission review.</div>';
+  }
+  async function loadOptionalInventories() {
+    const requestId=++state.inventoryRequestId;
+    const results=await Promise.allSettled([
+      api("/v1/skills"),api("/v1/mcp/tools"),api("/assets/workflow-catalog.json")
+    ]);
+    if(requestId!==state.inventoryRequestId)return;
+    const [skills,mcpTools,workflowCatalog]=results;
+    state.inventoryErrors={};
+    const value=(result,key,fallback)=>{
+      if(result.status==="fulfilled")return result.value;
+      state.inventoryErrors[key]=result.reason?.message||"Request failed";
+      return fallback;
+    };
+    const skillBody=value(skills,"skills",{items:[]});
+    const toolBody=value(mcpTools,"mcpTools",{items:[]});
+    state.skills=Array.isArray(skillBody.items)?skillBody.items:[];
+    state.mcpTools=Array.isArray(toolBody.items)?toolBody.items:[];
+    state.workflowCatalog=value(workflowCatalog,"workflowCatalog",{status:"unavailable",count:0,workflows:[]});
+    renderWorkflowFilters();
+    renderWorkflowCatalogue();
+    renderSkillsAndTools();
+  }
   async function refresh() {
     $("refresh").disabled=true;
     try {
@@ -104,7 +174,7 @@
         api("/v1/providers"),api("/v1/capabilities"),api("/v1/improvements"),api("/v1/approvals"),
         api("/v1/resources?limit=100"),api("/v1/quality-evaluations?limit=20")
       ]);
-      state.status=status; state.agents=agents.items||[];
+      state.status=status; state.agents=agents.items||[]; state.tasks=tasks.items||[]; state.capabilities=caps.items||[];
       $("metric-health").textContent=status.health?.status||"Ready";
       $("health-note").textContent=status.health?.detail||"Runtime status received";
       $("metric-agents").textContent=agents.count??state.agents.length;
@@ -122,7 +192,7 @@
       ].join("");
       $("recent-events").innerHTML=(events.items||[]).length?events.items.map(e=>row(e.event_type,e.agent_id||e.task_id||"",time(e.ts))).join(""):'<div class="empty">No events recorded yet.</div>';
       $("audit-events").innerHTML=$("recent-events").innerHTML;
-      renderTaskList(tasks.items||[]);
+      renderTaskList(state.tasks); renderLiveWorkflowRuns();
       $("capability-list").innerHTML=(caps.items||[]).length?caps.items.map(c=>row(c.name||c.capability_id,c.source||c.description||"",c.status||"registered")).join(""):'<div class="empty">No capabilities registered. Catalog entries do not imply live integrations.</div>';
       $("improvement-list").innerHTML=(improvements.items||[]).length?improvements.items.map(p=>row(p.proposal_id,p.agent_id+" · "+p.changes,p.status)).join(""):'<div class="empty">No improvement proposals recorded.</div>';
       $("approval-list").innerHTML=(approvals.items||[]).length?approvals.items.map(a=>row(a.approval_id,a.permission,a.status)).join(""):'<div class="empty">'+esc(approvals.message||"No pending approval records are exposed. Privileged execution remains disabled.")+'</div>';
@@ -135,7 +205,7 @@
       $("replay-state").textContent=status.governance?.replay_protection||"Not verified";
       $("recovery-state").textContent=status.storage?.recovery||"Not verified";
       $("updated").textContent="Updated "+new Date().toLocaleTimeString();
-      renderAgents(); renderProviders(providers.providers||[]); setConnected(true);
+      renderAgents(); renderProviders(providers.providers||[]); setConnected(true); void loadOptionalInventories();
     } catch(error) {
       setConnected(false);
       if (error.message==="Unauthorized."||error.message==="Unauthorized") {
@@ -147,12 +217,17 @@
   function showView(name) {
     document.querySelectorAll(".view").forEach(v=>v.classList.toggle("active",v.id==="view-"+name));
     document.querySelectorAll(".nav").forEach(v=>v.classList.toggle("active",v.dataset.view===name));
-    const titles={overview:"System overview",agents:"Agent registry",tasks:"Tasks & workflows",providers:"AI providers",capabilities:"Capabilities",intelligence:"Resource & AI quality",governance:"Governance",audit:"Audit & learning"};
+    const titles={overview:"System overview",agents:"Agent registry",tasks:"Tasks & workflows",providers:"AI providers",capabilities:"Capabilities",intelligence:"Resource & AI quality",governance:"Governance",audit:"Audit & learning",workflows:"Workflow Studio",skills:"Skills & tools"};
     $("page-title").textContent=titles[name]||"System overview";
-    if (name==="tasks"||name==="audit"||name==="governance"||name==="intelligence") refresh();
+    if (name==="tasks"||name==="audit"||name==="governance"||name==="intelligence"||name==="workflows"||name==="skills") refresh();
   }
   document.querySelectorAll("[data-view]").forEach(link=>link.addEventListener("click",e=>{e.preventDefault();const name=link.dataset.view;showView(name);history.replaceState(null,"","#"+name);}));
   $("refresh").addEventListener("click",refresh);
+  $("workflow-run-list").addEventListener("click",e=>{
+    const button=e.target.closest("[data-workflow-trace]");
+    if(!button)return;
+    loadTaskTrace(button.dataset.workflowTrace,0,false);
+  });
   $("task-list").addEventListener("click",e=>{
     const button=e.target.closest("[data-trace-task]");
     if(!button)return;
@@ -197,6 +272,9 @@
     } finally {button.disabled=false;}
   });
   $("agent-search").addEventListener("input",e=>{const q=e.target.value.toLowerCase();document.querySelectorAll("#agent-grid article").forEach(card=>card.hidden=!card.textContent.toLowerCase().includes(q));});
+  $("workflow-search").addEventListener("input",renderWorkflowCatalogue);
+  $("workflow-category").addEventListener("change",renderWorkflowCatalogue);
+  $("workflow-role").addEventListener("change",renderWorkflowCatalogue);
   $("task-provider").addEventListener("change",syncLifecycleMode);
   $("auth-form").addEventListener("submit",async e=>{e.preventDefault();state.token=$("auth-token").value.trim();$("auth-error").textContent="";await refresh();if(state.status)$("auth-overlay").classList.add("hidden");});
   $("proposal-form").addEventListener("submit",async e=>{

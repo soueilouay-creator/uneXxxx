@@ -104,7 +104,7 @@ class DeploymentContractTests(unittest.TestCase):
     def test_render_blueprint_starts_without_optional_provider_secrets(self):
         render = (ROOT / "render.yaml").read_text(encoding="utf-8")
         self.assertIn("UNEXPECTED_DEFAULT_PROVIDER", render)
-        self.assertRegex(render, r"(?m)^\\s+value:\\s*mock\\s*$")
+        self.assertIn("        value: mock", render)
         for key in ("OPENROUTER_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENOX_API_KEY"):
             with self.subTest(key=key):
                 self.assertNotIn(key, render)

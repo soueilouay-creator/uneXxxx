@@ -345,6 +345,7 @@ class CommandCenterAPITests(unittest.TestCase):
         self.assertIn("function renderLiveWorkflowRuns()", js)
         self.assertIn("data-workflow-trace", js)
         self.assertIn("loadTaskTrace(button.dataset.workflowTrace", js)
+        self.assertIn('$("workflow-run-list").addEventListener("click"', js)
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

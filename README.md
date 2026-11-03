@@ -10,7 +10,7 @@ uneXpected v8 is one governed Python application with one desktop web command ce
 - A desktop-first command center for system health, agents, tasks, the visual Workflow Studio, Skills & tools, providers, capabilities, approvals, audit, and improvement proposals.
 - A searchable catalogue of 120 v6→v7 workflow candidates, with role mappings, source provenance, procedure steps, deliverables and acceptance checks. Candidate records are not treated as runnable deployments.
 - The canonical 38 specialist roles and a hash-pinned Skill bundle registry with backward-compatible v1/v2 manifests.
-- The governed coordinator and seven-stage workflow: Request → Plan → Execute → Verify → Improve → Deliver → Learn.
+- The governed coordinator and seven-stage workflow: Request → Plan → Route → Authorize → Execute → Verify → Deliver & learn.
 - Resource Intelligence: permanent Awesome research index with provenance, independent license/security status and discovery-only adoption states.
 - AI Quality Evaluation: bounded deterministic output checks for instruction following, prompt injection, grounding, safety, structured output and regressions.
 - Native server-side provider adapters for OpenAI, Anthropic, OpenRouter and the OpenOx Responses API, plus explicit deterministic mock mode. Provider credentials remain server-side and live routes require a successful connection check.

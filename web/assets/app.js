@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  const state = { token: "", agents: [], providers: [], skills: [], mcpTools: [], capabilities: [], workflowCatalog: null, status: null, traceTaskId: null, traceCursor: 0 };
+  const state = { token: "", agents: [], providers: [], skills: [], mcpTools: [], capabilities: [], workflowCatalog: null, inventoryErrors: {}, inventoryRequestId: 0, status: null, traceTaskId: null, traceCursor: 0 };
   const $ = (id) => document.getElementById(id);
   const esc = (v) => String(v ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   const time = (v) => { if (!v) return "—"; const n=Number(v); const d=new Date(n>1e12?n:n*1000); return Number.isNaN(d.getTime())?String(v):d.toLocaleString(); };
@@ -106,6 +106,12 @@
   }
   function renderWorkflowCatalogue(){
     const catalog=state.workflowCatalog||{},rows=catalog.workflows||[],q=$("workflow-search").value.trim().toLowerCase(),cat=$("workflow-category").value,role=$("workflow-role").value;
+    if(state.inventoryErrors.workflowCatalog){
+      $("workflow-total").textContent="—";$("workflow-nav-count").textContent="!";$("workflow-filter-count").textContent="Catalogue unavailable";
+      $("workflow-catalog-status").textContent="Catalogue unavailable";
+      $("workflow-grid").innerHTML='<div class="empty">Workflow catalogue unavailable: '+esc(state.inventoryErrors.workflowCatalog)+'</div>';
+      return;
+    }
     const selected=rows.filter(x=>{const text=[x.title,x.description,x.category,x.source_path,x.primary_agent_id,...(x.supporting_agent_ids||[])].join(" ").toLowerCase(),mapped=[x.primary_agent_id,...(x.supporting_agent_ids||[])];return(!q||text.includes(q))&&(!cat||x.category===cat)&&(!role||mapped.includes(role));});
     $("workflow-total").textContent=rows.length;$("workflow-nav-count").textContent=rows.length;$("workflow-filter-count").textContent=selected.length+" of "+rows.length+" mapped candidates";
     $("workflow-catalog-status").textContent=catalog.status==="mapped_candidates_not_runnable"?"Crosswalk loaded · mapped only":"Catalogue status unknown";
@@ -116,25 +122,49 @@
   }
   function renderSkillsAndTools(){
     const list=state.skills||[],tools=state.mcpTools||[],caps=state.capabilities||[];
-    $("skill-total").textContent=list.length;$("skill-nav-count").textContent=list.length;$("mcp-tool-total").textContent=tools.length;
-    $("skill-grid").innerHTML=list.length?list.map(s=>{
+    $("skill-total").textContent=state.inventoryErrors.skills?"—":list.length;
+    $("skill-nav-count").textContent=state.inventoryErrors.skills?"!":list.length;
+    $("mcp-tool-total").textContent=state.inventoryErrors.mcpTools?"—":tools.length;
+    $("skill-grid").innerHTML=state.inventoryErrors.skills?'<div class="empty">Skills unavailable: '+esc(state.inventoryErrors.skills)+'</div>':list.length?list.map(s=>{
       const roles=(s.agent_ids||[]).map(esc).join(", "),triggers=(s.trigger_terms||[]).map(esc).join(", ")||"Runtime policy",allowed=(s.allowed_tools||[]).map(esc).join(", ")||"No direct tool grants",resources=(s.resources||[]).map(x=>esc(x.kind)+": "+esc(x.path)).join(" · ")||"No additional resources";
       return '<article class="skill-card"><div class="workflow-card-top"><span class="category-tag">Skill v'+esc(s.version)+'</span><span class="state '+(s.status==="active"?"ok":"")+'">'+esc(s.status)+'</span></div><h4>'+esc(s.id)+'</h4><p>'+esc(s.description||"Hash-pinned reusable specialist procedure.")+'</p><div class="skill-meta"><div><small>INVOCATION MODE</small><b>'+esc(s.invocation_mode)+'</b></div><div><small>ALLOWED TOOLS</small><b>'+allowed+'</b></div></div><b>Mapped roles</b><p>'+roles+'</p><b>Activation triggers</b><p>'+triggers+'</p><b>Bundle files</b><p>'+resources+'</p><small class="hash-line">SHA-256 '+esc(s.sha256)+'<br>Source: '+esc(s.source_ref)+'</small></article>';
     }).join(""):'<div class="empty">No active Skills are available from the verified manifest.</div>';
     const manual=list.filter(x=>x.invocation_mode==="user_invocable").length;
     $("skill-policy-note").innerHTML='<b>Skill activation policy</b><p>'+manual+' of '+list.length+' active Skills are explicitly user-invocable. Automatic Skills are selected by the runtime using the objective triggers and role scope. Skills do not independently grant permissions. The loader verifies SHA-256 content and does not execute packaged scripts.</p>';
-    $("mcp-tool-grid").innerHTML=tools.length?tools.map(t=>'<article class="tool-card"><div class="workflow-card-top"><span class="category-tag">MCP adapter</span><span class="state '+(t.enabled?"ok":"")+'">'+esc(t.capability_status)+'</span></div><h4>'+esc(t.name)+'</h4><p>'+esc(t.description)+'</p><div class="skill-meta"><div><small>TOOL ID</small><b>'+esc(t.tool_id)+'</b></div><div><small>CAPABILITY</small><b>'+esc(t.capability_id)+'</b></div></div><b>Allowed roles</b><p>'+((t.allowed_agent_ids||[]).map(esc).join(", ")||"None")+'</p><b>Required permissions</b><p>'+((t.required_permissions||[]).map(esc).join(", ")||"None")+'</p><small>Source: '+esc(t.source_url)+' · '+esc(t.source_publisher)+' · v'+esc(t.version)+'</small></article>').join(""):'<article class="panel empty"><b>No MCP adapters registered</b><p>The MCP gateway boundary is implemented, but no external MCP server or tool adapter is installed, enabled or authorised. The current count is zero, not simulated.</p></article>';
+    $("mcp-tool-grid").innerHTML=state.inventoryErrors.mcpTools?'<div class="empty">MCP tool inventory unavailable: '+esc(state.inventoryErrors.mcpTools)+'</div>':tools.length?tools.map(t=>'<article class="tool-card"><div class="workflow-card-top"><span class="category-tag">MCP adapter</span><span class="state '+(t.enabled?"ok":"")+'">'+esc(t.capability_status)+'</span></div><h4>'+esc(t.name)+'</h4><p>'+esc(t.description)+'</p><div class="skill-meta"><div><small>TOOL ID</small><b>'+esc(t.tool_id)+'</b></div><div><small>CAPABILITY</small><b>'+esc(t.capability_id)+'</b></div></div><b>Allowed roles</b><p>'+((t.allowed_agent_ids||[]).map(esc).join(", ")||"None")+'</p><b>Required permissions</b><p>'+((t.required_permissions||[]).map(esc).join(", ")||"None")+'</p><small>Source: '+esc(t.source_url)+' · '+esc(t.source_publisher)+' · v'+esc(t.version)+'</small></article>').join(""):'<article class="panel empty"><b>No MCP adapters registered</b><p>The MCP gateway boundary is implemented, but no external MCP server or tool adapter is installed, enabled or authorised. The current count is zero, not simulated.</p></article>';
     $("skills-capability-list").innerHTML=caps.length?caps.map(x=>row(x.name||x.capability_id,x.description||x.source_url||"",x.status||"unknown")).join(""):'<div class="empty">No capabilities are registered. Additions require provenance, licence, role scope and permission review.</div>';
+  }
+  async function loadOptionalInventories() {
+    const requestId=++state.inventoryRequestId;
+    const results=await Promise.allSettled([
+      api("/v1/skills"),api("/v1/mcp/tools"),api("/assets/workflow-catalog.json")
+    ]);
+    if(requestId!==state.inventoryRequestId)return;
+    const [skills,mcpTools,workflowCatalog]=results;
+    state.inventoryErrors={};
+    const value=(result,key,fallback)=>{
+      if(result.status==="fulfilled")return result.value;
+      state.inventoryErrors[key]=result.reason?.message||"Request failed";
+      return fallback;
+    };
+    const skillBody=value(skills,"skills",{items:[]});
+    const toolBody=value(mcpTools,"mcpTools",{items:[]});
+    state.skills=Array.isArray(skillBody.items)?skillBody.items:[];
+    state.mcpTools=Array.isArray(toolBody.items)?toolBody.items:[];
+    state.workflowCatalog=value(workflowCatalog,"workflowCatalog",{status:"unavailable",count:0,workflows:[]});
+    renderWorkflowFilters();
+    renderWorkflowCatalogue();
+    renderSkillsAndTools();
   }
   async function refresh() {
     $("refresh").disabled=true;
     try {
-      const [status,agents,tasks,events,providers,caps,skills,mcpTools,workflowCatalog,improvements,approvals,resources,qualityRuns]=await Promise.all([
+      const [status,agents,tasks,events,providers,caps,improvements,approvals,resources,qualityRuns]=await Promise.all([
         api("/v1/status"),api("/v1/agents"),api("/v1/tasks?limit=8"),api("/v1/events?limit=8"),
-        api("/v1/providers"),api("/v1/capabilities"),api("/v1/skills"),api("/v1/mcp/tools"),api("/assets/workflow-catalog.json"),api("/v1/improvements"),api("/v1/approvals"),
+        api("/v1/providers"),api("/v1/capabilities"),api("/v1/improvements"),api("/v1/approvals"),
         api("/v1/resources?limit=100"),api("/v1/quality-evaluations?limit=20")
       ]);
-      state.status=status; state.agents=agents.items||[]; state.skills=skills.items||[]; state.mcpTools=mcpTools.items||[]; state.capabilities=caps.items||[]; state.workflowCatalog=workflowCatalog;
+      state.status=status; state.agents=agents.items||[]; state.capabilities=caps.items||[];
       $("metric-health").textContent=status.health?.status||"Ready";
       $("health-note").textContent=status.health?.detail||"Runtime status received";
       $("metric-agents").textContent=agents.count??state.agents.length;
@@ -165,7 +195,7 @@
       $("replay-state").textContent=status.governance?.replay_protection||"Not verified";
       $("recovery-state").textContent=status.storage?.recovery||"Not verified";
       $("updated").textContent="Updated "+new Date().toLocaleTimeString();
-      renderAgents(); renderProviders(providers.providers||[]); renderWorkflowFilters(); renderWorkflowCatalogue(); renderSkillsAndTools(); setConnected(true);
+      renderAgents(); renderProviders(providers.providers||[]); setConnected(true); void loadOptionalInventories();
     } catch(error) {
       setConnected(false);
       if (error.message==="Unauthorized."||error.message==="Unauthorized") {

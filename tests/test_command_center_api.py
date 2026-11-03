@@ -316,6 +316,23 @@ class CommandCenterAPITests(unittest.TestCase):
         self.assertEqual(tools["items"], [])
 
 
+    def test_optional_inventory_failures_cannot_block_core_refresh(self):
+        source = (ROOT / "web" / "assets" / "app.js").read_text(encoding="utf-8")
+        start = source.index("async function refresh()")
+        end = source.index("function showView", start)
+        refresh_source = source[start:end]
+        core_start = refresh_source.index("const [status,agents")
+        core_end = refresh_source.index("]);", core_start)
+        core_requests = refresh_source[core_start:core_end]
+        self.assertNotIn('/v1/skills', core_requests)
+        self.assertNotIn('/v1/mcp/tools', core_requests)
+        self.assertNotIn('/assets/workflow-catalog.json', core_requests)
+        self.assertIn("Promise.allSettled", source)
+        self.assertIn("state.inventoryErrors.workflowCatalog", source)
+        self.assertIn("state.inventoryErrors.skills", source)
+        self.assertIn("state.inventoryErrors.mcpTools", source)
+
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

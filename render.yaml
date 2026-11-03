@@ -20,6 +20,7 @@ services:
         generateValue: true
       - key: UNEXPECTED_DEFAULT_PROVIDER
         value: mock
+      # Existing-service updates do not prompt for new sync:false values; add each provider key manually in the service private Environment settings before provider-specific smoke tests.
       - key: OPENROUTER_API_KEY
         sync: false
       - key: OPENROUTER_MODEL

@@ -40,6 +40,7 @@ class SkillSpec:
             "version": self.version,
             "description": self.description,
             "agent_ids": list(self.agent_ids),
+            "trigger_terms": list(self.trigger_terms),
             "invocation_mode": self.invocation_mode,
             "allowed_tools": list(self.allowed_tools),
             "resources": [

@@ -310,6 +310,7 @@ class CommandCenterAPITests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(skills["count"], 3)
         self.assertTrue(all(item["status"] == "active" for item in skills["items"]))
+        self.assertTrue(all("trigger_terms" in item for item in skills["items"]))
         tools_status, tools = self.request("GET", "/v1/mcp/tools", token=self.token)
         self.assertEqual(tools_status, 200)
         self.assertEqual(tools["items"], [])

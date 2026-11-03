@@ -1,0 +1,184 @@
+name: Request privileged-action approval
+
+on:
+  workflow_dispatch:
+    inputs:
+      proposal_id:
+        description: Unique proposal ID (letters, digits, dot, underscore, hyphen)
+        required: true
+        type: string
+      permission:
+        description: Exact protected permission requested
+        required: true
+        type: choice
+        options:
+          - email_send
+          - publish
+          - repo_write
+          - delete
+          - deploy
+          - trade
+          - payment
+          - account_change
+          - external_write
+          - schedule_background
+          - modify_policy
+          - modify_permissions
+          - change_provider
+          - install_external_tool
+          - approve_knowledge
+      action_digest:
+        description: 64-character lowercase SHA-256 of canonical action details
+        required: true
+        type: string
+      action_details_json:
+        description: Canonical action-details JSON (metadata only; no secrets)
+        required: true
+        type: string
+      summary:
+        description: Human-readable description of the proposed operation (no secrets)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  open-request:
+    if: github.actor == 'soueilouay-creator'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create immutable approval request and bot-authored PR
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPOSITORY: ${{ github.repository }}
+          GH_ACTOR: ${{ github.actor }}
+          APPROVAL_REVIEWER: ${{ vars.UNEXPECTED_APPROVAL_REVIEWER }}
+          PROPOSAL_ID: ${{ inputs.proposal_id }}
+          APPROVAL_PERMISSION: ${{ inputs.permission }}
+          ACTION_DIGEST: ${{ inputs.action_digest }}
+          ACTION_DETAILS_JSON: ${{ inputs.action_details_json }}
+          ACTION_SUMMARY: ${{ inputs.summary }}
+          WORKFLOW_RUN_ID: ${{ github.run_id }}
+        run: |
+          python - <<'PY'
+          import base64, hashlib, json, os, re, urllib.error, urllib.request
+          from datetime import datetime, timezone
+
+          repository = os.environ['GH_REPOSITORY']
+          owner, repo = repository.split('/', 1)
+          proposal_id = os.environ['PROPOSAL_ID']
+          permission = os.environ['APPROVAL_PERMISSION']
+          digest = os.environ['ACTION_DIGEST']
+          details_json = os.environ['ACTION_DETAILS_JSON']
+          summary = os.environ['ACTION_SUMMARY'].strip()
+          allowed = {
+              'email_send', 'publish', 'repo_write', 'delete', 'deploy', 'trade', 'payment',
+              'account_change', 'external_write', 'schedule_background', 'modify_policy',
+              'modify_permissions', 'change_provider', 'install_external_tool', 'approve_knowledge'
+          }
+          if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,63}', proposal_id):
+              raise SystemExit('Invalid proposal_id')
+          if permission not in allowed:
+              raise SystemExit('Permission is not in the protected allowlist')
+          if not re.fullmatch(r'[0-9a-f]{64}', digest):
+              raise SystemExit('action_digest must be 64 lowercase hexadecimal characters')
+          if len(details_json) > 16000:
+              raise SystemExit('action_details_json exceeds 16000 characters')
+          try:
+              action_details = json.loads(details_json)
+              if not isinstance(action_details, dict):
+                  raise ValueError('action details must be a JSON object')
+              canonical = json.dumps(action_details, sort_keys=True, separators=(',', ':'),
+                                     ensure_ascii=False, allow_nan=False).encode('utf-8')
+          except (ValueError, TypeError) as exc:
+              raise SystemExit('action_details_json must be a valid finite JSON object') from exc
+          if permission not in action_details.get('required_permissions', []):
+              raise SystemExit('action_details_json must include the requested permission in required_permissions')
+          if hashlib.sha256(canonical).hexdigest() != digest:
+              raise SystemExit('action_digest does not match action_details_json')
+          if not summary or len(summary) > 1000:
+              raise SystemExit('summary must contain 1 to 1000 characters')
+          if os.environ['GH_ACTOR'].lower() != 'soueilouay-creator':
+              raise SystemExit('Only the configured repository owner may request privileged approvals')
+          reviewer = os.environ.get('APPROVAL_REVIEWER', '').strip()
+          if not re.fullmatch(r'[A-Za-z0-9-]{1,39}', reviewer):
+              raise SystemExit('Set repository variable UNEXPECTED_APPROVAL_REVIEWER to a valid GitHub username')
+          if reviewer.lower() == os.environ['GH_ACTOR'].lower():
+              raise SystemExit('The configured approval reviewer must be different from the requester')
+
+          token = os.environ['GITHUB_TOKEN']
+          api = 'https://api.github.com'
+          headers = {
+              'Accept': 'application/vnd.github+json',
+              'Authorization': 'Bearer ' + token,
+              'X-GitHub-Api-Version': '2026-03-10',
+              'User-Agent': 'uneXpected-approval-request-workflow',
+          }
+          def api_call(method, path, payload=None):
+              data = None if payload is None else json.dumps(payload).encode()
+              request = urllib.request.Request(api + path, data=data, headers=headers, method=method)
+              try:
+                  with urllib.request.urlopen(request, timeout=15) as response:
+                      raw = response.read(1_000_001)
+                      if len(raw) > 1_000_000:
+                          raise RuntimeError('GitHub API response exceeded size limit')
+                      return json.loads(raw.decode()) if raw else {}
+              except urllib.error.HTTPError as exc:
+                  # Do not print headers or token-bearing request objects.
+                  raise RuntimeError(f'GitHub API request failed with HTTP {exc.code}') from None
+
+          branch = 'approval-requests/' + proposal_id
+          head_path = f'/repos/{owner}/{repo}/git/ref/heads/{branch}'
+          try:
+              api_call('GET', head_path)
+              raise SystemExit('This proposal branch already exists; do not overwrite or replay it')
+          except RuntimeError as exc:
+              if 'HTTP 404' not in str(exc):
+                  raise
+
+          base = api_call('GET', f'/repos/{owner}/{repo}/git/ref/heads/main')
+          base_sha = base['object']['sha']
+          request_document = {
+              'schema': 'uneXpected.approval-request/v1',
+              'proposal_id': proposal_id,
+              'repository': repository,
+              'permission': permission,
+              'action_details': action_details,
+              'action_digest': digest,
+              'summary': summary,
+              'requested_by': os.environ['GH_ACTOR'],
+              'workflow_run_id': os.environ['WORKFLOW_RUN_ID'],
+              'created_at': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
+          }
+          encoded = base64.b64encode((json.dumps(request_document, sort_keys=True, indent=2) + '\n').encode()).decode()
+          api_call('POST', f'/repos/{owner}/{repo}/git/refs', {
+              'ref': 'refs/heads/' + branch, 'sha': base_sha,
+          })
+          api_call('PUT', f'/repos/{owner}/{repo}/contents/approvals/requests/{proposal_id}.json', {
+              'message': 'chore(approvals): request ' + proposal_id,
+              'content': encoded,
+              'branch': branch,
+          })
+          pr = api_call('POST', f'/repos/{owner}/{repo}/pulls', {
+              'title': 'Approval request: ' + proposal_id,
+              'head': branch,
+              'base': 'main',
+              'body': (
+                  '## Privileged action approval request\n\n'
+                  + '**Summary:** ' + summary + '\n\n'
+                  + '**Permission:** `' + permission + '`\n\n'
+                  + '**Action digest:** `' + digest + '`\n\n'
+                  + '**Action details:**\n\n```json\n' + json.dumps(action_details, sort_keys=True, indent=2, ensure_ascii=False) + '\n```\n\n'
+                  + '**Proposal:** `' + proposal_id + '`\n\n'
+                  + 'Review the committed `approvals/requests/' + proposal_id + '.json` file. '
+                    'Approval is only valid for this exact head commit and action digest. '
+                    'Do not approve if the action details are unclear.'
+              ),
+          })
+          api_call('POST', f"/repos/{owner}/{repo}/pulls/{pr['number']}/requested_reviewers", {
+              'reviewers': [reviewer],
+          })
+          print('Approval request PR created and reviewer requested: ' + pr['html_url'])
+          PY

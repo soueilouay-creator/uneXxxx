@@ -25,7 +25,7 @@ This matrix describes the public `main` source tree, not a live hosted service. 
 | Replay protection | PostgreSQL adapter and tests implemented | Durable idempotency claims are schema-backed; a hosted end-to-end deployment/restart/replay test remains outstanding. |
 | Consequential actions | Denied by default | Publishing, payments, external messages, account changes, destructive writes and protected deployments remain disabled until the trusted approval and recovery controls are verified. |
 | MCP adapter boundary | Implemented in-process | `GET /v1/mcp/tools` lists only registered adapters. The current registration count is zero; no remote MCP transport, server discovery or third-party MCP server is connected. |
-| Research and browsing | Not wired into runtime | The resource catalogue is a provenance-aware discovery index. ChatGPT web/search tools do not automatically become uneXpected runtime tools. |
+| Research and browsing | Not wired into runtime | The resource catalogue is a provenance-aware discovery index. Web/current-source search is not wired into this runtime; ChatGPT web/search tools do not automatically become uneXpected runtime tools. |
 | Browser, CRM, email and external connectors | Not configured | No connector is registered or authorized in the new runtime. |
 | Scheduler and background workers | Not configured | No always-on scheduler, queue worker or autonomous recurring action is deployed. |
 | Image, video, voice and music generation | Planning only inside this runtime | External generation services are not connected or authorized by the new deployment. |

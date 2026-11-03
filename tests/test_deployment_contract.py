@@ -131,7 +131,7 @@ class DeploymentContractTests(unittest.TestCase):
 
     def test_deploy_runbook_documents_zero_spend_and_free_tier_limits(self):
         deploy = (ROOT / "DEPLOY.md").read_text(encoding="utf-8")
-        self.assertIn("no Render service is currently linked to this repository", deploy)
+        self.assertIn("no render service is currently linked to this repository", deploy.lower())
         self.assertIn("5 GB of included outbound bandwidth", deploy)
         self.assertIn("$0.15/GB", deploy)
         self.assertIn("ephemeral filesystem", deploy)

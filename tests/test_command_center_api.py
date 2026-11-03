@@ -286,10 +286,6 @@ class CommandCenterAPITests(unittest.TestCase):
         self.assertIn('/v1/quality-evaluations', js)
 
 
-
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
-
     def test_workflow_studio_and_skills_views_are_exposed(self):
         status, html = self.request("GET", "/")
         self.assertEqual(status, 200)
@@ -304,4 +300,21 @@ if __name__ == "__main__":
         self.assertEqual(body["count"], 120)
         self.assertEqual(body["status"], "mapped_candidates_not_runnable")
         self.assertEqual(len(body["workflows"]), 120)
+        self.assertTrue(all(item["disposition"] == "merged-as-workflow-capability-not-separate-agent"
+                            for item in body["workflows"]))
 
+    def test_skills_and_mcp_tools_are_authenticated_live_runtime_catalogues(self):
+        self.assertEqual(self.request("GET", "/v1/skills")[0], 401)
+        self.assertEqual(self.request("GET", "/v1/mcp/tools")[0], 401)
+        status, skills = self.request("GET", "/v1/skills", token=self.token)
+        self.assertEqual(status, 200)
+        self.assertEqual(skills["count"], 3)
+        self.assertTrue(all(item["status"] == "active" for item in skills["items"]))
+        tools_status, tools = self.request("GET", "/v1/mcp/tools", token=self.token)
+        self.assertEqual(tools_status, 200)
+        self.assertEqual(tools["items"], [])
+
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

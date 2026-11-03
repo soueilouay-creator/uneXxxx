@@ -334,5 +334,17 @@ class CommandCenterAPITests(unittest.TestCase):
 
 
 
+
+    def test_workflow_studio_renders_runtime_task_activity(self):
+        status, html = self.request("GET", "/")
+        js_status, js = self.request("GET", "/assets/app.js")
+        self.assertEqual(status, 200)
+        self.assertEqual(js_status, 200)
+        self.assertIn('id="workflow-run-list"', html)
+        self.assertIn('id="workflow-run-count"', html)
+        self.assertIn("function renderLiveWorkflowRuns()", js)
+        self.assertIn("data-workflow-trace", js)
+        self.assertIn("loadTaskTrace(button.dataset.workflowTrace", js)
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

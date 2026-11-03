@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  const state = { token: "", agents: [], providers: [], skills: [], mcpTools: [], capabilities: [], workflowCatalog: null, inventoryErrors: {}, inventoryRequestId: 0, status: null, traceTaskId: null, traceCursor: 0 };
+  const state = { token: "", agents: [], providers: [], tasks: [], skills: [], mcpTools: [], capabilities: [], workflowCatalog: null, inventoryErrors: {}, inventoryRequestId: 0, status: null, traceTaskId: null, traceCursor: 0 };
   const $ = (id) => document.getElementById(id);
   const esc = (v) => String(v ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   const time = (v) => { if (!v) return "—"; const n=Number(v); const d=new Date(n>1e12?n:n*1000); return Number.isNaN(d.getTime())?String(v):d.toLocaleString(); };
@@ -97,6 +97,16 @@
     if(!hasConfiguredLiveProvider&&$("task-mode").value==="lifecycle")$("task-mode").value="invoke";
   }
 
+  function renderLiveWorkflowRuns() {
+    const runs=state.tasks||[];
+    $("workflow-run-count").textContent=String(runs.length);
+    $("workflow-run-list").innerHTML=runs.length?runs.map(task=>{
+      const trace='<button class="button secondary trace-task" data-workflow-trace="'+esc(task.task_id)+'" type="button">View trace</button>';
+      const status='<span class="state '+(task.status==="completed"?"ok":"")+'">'+esc(task.status||"unknown")+'</span>';
+      const detail=esc(task.agent_id||"unassigned")+(task.parent_task_id?" · child of "+esc(task.parent_task_id):"")+" · "+esc(time(task.created_at));
+      return '<div class="list-row"><div><div class="list-title">'+esc(task.objective||task.task_id)+'</div><div class="list-detail">'+detail+'</div></div><div class="list-meta">'+status+trace+'</div></div>';
+    }).join(""):'<div class="empty">No workflow runs recorded yet. Submit a task from the command center to see its runtime trace here.</div>';
+  }
   function renderWorkflowFilters(){
     const rows=(state.workflowCatalog||{}).workflows||[],categories=[...new Set(rows.map(x=>x.category).filter(Boolean))].sort(),roles=[...new Set(rows.flatMap(x=>[x.primary_agent_id,...(x.supporting_agent_ids||[])].filter(Boolean)))].sort();
     const c=$("workflow-category"),r=$("workflow-role"),oldC=c.value,oldR=r.value;
@@ -164,7 +174,7 @@
         api("/v1/providers"),api("/v1/capabilities"),api("/v1/improvements"),api("/v1/approvals"),
         api("/v1/resources?limit=100"),api("/v1/quality-evaluations?limit=20")
       ]);
-      state.status=status; state.agents=agents.items||[]; state.capabilities=caps.items||[];
+      state.status=status; state.agents=agents.items||[]; state.tasks=tasks.items||[]; state.capabilities=caps.items||[];
       $("metric-health").textContent=status.health?.status||"Ready";
       $("health-note").textContent=status.health?.detail||"Runtime status received";
       $("metric-agents").textContent=agents.count??state.agents.length;
@@ -182,7 +192,7 @@
       ].join("");
       $("recent-events").innerHTML=(events.items||[]).length?events.items.map(e=>row(e.event_type,e.agent_id||e.task_id||"",time(e.ts))).join(""):'<div class="empty">No events recorded yet.</div>';
       $("audit-events").innerHTML=$("recent-events").innerHTML;
-      renderTaskList(tasks.items||[]);
+      renderTaskList(state.tasks); renderLiveWorkflowRuns();
       $("capability-list").innerHTML=(caps.items||[]).length?caps.items.map(c=>row(c.name||c.capability_id,c.source||c.description||"",c.status||"registered")).join(""):'<div class="empty">No capabilities registered. Catalog entries do not imply live integrations.</div>';
       $("improvement-list").innerHTML=(improvements.items||[]).length?improvements.items.map(p=>row(p.proposal_id,p.agent_id+" · "+p.changes,p.status)).join(""):'<div class="empty">No improvement proposals recorded.</div>';
       $("approval-list").innerHTML=(approvals.items||[]).length?approvals.items.map(a=>row(a.approval_id,a.permission,a.status)).join(""):'<div class="empty">'+esc(approvals.message||"No pending approval records are exposed. Privileged execution remains disabled.")+'</div>';

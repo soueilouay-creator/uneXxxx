@@ -100,5 +100,14 @@ class DeploymentContractTests(unittest.TestCase):
         self.assertTrue(upstream_license.is_file())
         self.assertIn("Apache License", upstream_license.read_text(encoding="utf-8"))
 
+
+    def test_render_blueprint_starts_without_optional_provider_secrets(self):
+        render = (ROOT / "render.yaml").read_text(encoding="utf-8")
+        self.assertIn("UNEXPECTED_DEFAULT_PROVIDER", render)
+        self.assertRegex(render, r"(?m)^\\s+value:\\s*mock\\s*$")
+        for key in ("OPENROUTER_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENOX_API_KEY"):
+            with self.subTest(key=key):
+                self.assertNotIn(key, render)
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

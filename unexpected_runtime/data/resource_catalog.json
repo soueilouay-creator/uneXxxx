@@ -1,0 +1,299 @@
+{
+  "schema_version": 1,
+  "catalog_id": "unexpected-resource-intelligence",
+  "updated_at": "2026-11-02",
+  "policy": "Awesome is a permanent curated discovery source. Each linked resource requires independent license, maintenance, security, cost and integration review. Discovery does not authorize installation or execution.",
+  "sources": [
+    {
+      "id": "sindresorhus-awesome",
+      "name": "sindresorhus/awesome",
+      "kind": "primary-curated-index",
+      "canonical_url": "https://github.com/sindresorhus/awesome",
+      "license": {
+        "identifier": "CC0-1.0",
+        "status": "verified",
+        "evidence_url": "https://github.com/sindresorhus/awesome/blob/main/license"
+      },
+      "research_focus": [
+        "software-quality",
+        "security",
+        "reliability",
+        "data",
+        "engineering"
+      ]
+    },
+    {
+      "id": "awesome-testing",
+      "name": "TheJambo/awesome-testing",
+      "kind": "curated-list",
+      "canonical_url": "https://github.com/TheJambo/awesome-testing",
+      "license": {
+        "identifier": null,
+        "status": "not_reviewed",
+        "evidence_url": null
+      },
+      "research_focus": [
+        "AI evaluation",
+        "testing",
+        "replay",
+        "quality assurance"
+      ]
+    },
+    {
+      "id": "awesome-sre",
+      "name": "dastergon/awesome-sre",
+      "kind": "curated-list",
+      "canonical_url": "https://github.com/dastergon/awesome-sre",
+      "license": {
+        "identifier": null,
+        "status": "not_reviewed",
+        "evidence_url": null
+      },
+      "research_focus": [
+        "reliability",
+        "observability",
+        "recovery",
+        "SLO"
+      ]
+    },
+    {
+      "id": "awesome-appsec",
+      "name": "paragonie/awesome-appsec",
+      "kind": "curated-list",
+      "canonical_url": "https://github.com/paragonie/awesome-appsec",
+      "license": {
+        "identifier": null,
+        "status": "not_reviewed",
+        "evidence_url": null
+      },
+      "research_focus": [
+        "application security",
+        "prompt injection",
+        "secure development"
+      ]
+    },
+    {
+      "id": "awesome-postgres",
+      "name": "dhamaniasad/awesome-postgres",
+      "kind": "curated-list",
+      "canonical_url": "https://github.com/dhamaniasad/awesome-postgres",
+      "license": {
+        "identifier": null,
+        "status": "not_reviewed",
+        "evidence_url": null
+      },
+      "research_focus": [
+        "PostgreSQL",
+        "backup",
+        "migrations",
+        "performance"
+      ]
+    }
+  ],
+  "resources": [
+    {
+      "id": "promptfoo",
+      "name": "promptfoo",
+      "kind": "evaluation-framework",
+      "category": "ai-quality-testing",
+      "canonical_url": "https://github.com/promptfoo/promptfoo",
+      "source_id": "awesome-testing",
+      "source_list_url": "https://github.com/TheJambo/awesome-testing",
+      "source_revision": null,
+      "reviewed_at": "2026-11-02",
+      "license": {
+        "identifier": null,
+        "status": "not_reviewed",
+        "evidence_url": null
+      },
+      "maintenance_status": "not_assessed",
+      "maintenance_evidence_url": null,
+      "dependencies": [],
+      "expected_benefit": "Candidate reference for prompt and model regression evaluation.",
+      "integration_surface": "Research only; no package or runtime integration.",
+      "cost_model": "Not assessed; evaluate any model/API usage before adoption.",
+      "security_review": {
+        "status": "not_reviewed",
+        "evidence_url": null,
+        "reviewed_at": null
+      },
+      "evidence_urls": [],
+      "benchmark_ids": [],
+      "integration_test_refs": [],
+      "adoption_status": "discovered",
+      "approval_ref": null,
+      "duplicate_of": null,
+      "reviewer_notes": "Candidate only. Verify repository license, release activity, dependencies and security before any adoption."
+    },
+    {
+      "id": "tenro-python",
+      "name": "Tenro Python",
+      "kind": "agent-testing-framework",
+      "category": "ai-quality-testing",
+      "canonical_url": "https://github.com/tenro-ai/tenro-python",
+      "source_id": "awesome-testing",
+      "source_list_url": "https://github.com/TheJambo/awesome-testing",
+      "source_revision": null,
+      "reviewed_at": "2026-11-02",
+      "license": {
+        "identifier": null,
+        "status": "not_reviewed",
+        "evidence_url": null
+      },
+      "maintenance_status": "not_assessed",
+      "maintenance_evidence_url": null,
+      "dependencies": [],
+      "expected_benefit": "Candidate reference for agent workflow tests and deterministic fixtures.",
+      "integration_surface": "Research only; compare with existing Coordinator and unittest seams.",
+      "cost_model": "Not assessed.",
+      "security_review": {
+        "status": "not_reviewed",
+        "evidence_url": null,
+        "reviewed_at": null
+      },
+      "evidence_urls": [],
+      "benchmark_ids": [],
+      "integration_test_refs": [],
+      "adoption_status": "discovered",
+      "approval_ref": null,
+      "duplicate_of": null,
+      "reviewer_notes": "Candidate only. Do not install based on the parent Awesome list."
+    },
+    {
+      "id": "orca-replay",
+      "name": "OrcaReplay",
+      "kind": "agent-session-replay",
+      "category": "ai-quality-testing",
+      "canonical_url": "https://github.com/Continuum-AI-Corp/OrcaReplay",
+      "source_id": "awesome-testing",
+      "source_list_url": "https://github.com/TheJambo/awesome-testing",
+      "source_revision": null,
+      "reviewed_at": "2026-11-02",
+      "license": {
+        "identifier": null,
+        "status": "not_reviewed",
+        "evidence_url": null
+      },
+      "maintenance_status": "not_assessed",
+      "maintenance_evidence_url": null,
+      "dependencies": [],
+      "expected_benefit": "Candidate reference for reproducible AI workflow and tool-call replay.",
+      "integration_surface": "Research only; replay must remain offline and side-effect free.",
+      "cost_model": "Not assessed.",
+      "security_review": {
+        "status": "not_reviewed",
+        "evidence_url": null,
+        "reviewed_at": null
+      },
+      "evidence_urls": [],
+      "benchmark_ids": [],
+      "integration_test_refs": [],
+      "adoption_status": "discovered",
+      "approval_ref": null,
+      "duplicate_of": null,
+      "reviewer_notes": "Candidate only. Assess replay data sensitivity and side-effect containment before adoption."
+    },
+    {
+      "id": "awesome-sre-list",
+      "name": "Awesome SRE",
+      "kind": "reliability-reference-list",
+      "category": "reliability",
+      "canonical_url": "https://github.com/dastergon/awesome-sre",
+      "source_id": "sindresorhus-awesome",
+      "source_list_url": "https://github.com/sindresorhus/awesome",
+      "source_revision": null,
+      "reviewed_at": "2026-11-02",
+      "license": {
+        "identifier": null,
+        "status": "not_reviewed",
+        "evidence_url": null
+      },
+      "maintenance_status": "not_assessed",
+      "maintenance_evidence_url": null,
+      "dependencies": [],
+      "expected_benefit": "Reference material for SLOs, observability, incident response and recovery.",
+      "integration_surface": "Research reference only.",
+      "cost_model": "No direct runtime cost; downstream tools need independent review.",
+      "security_review": {
+        "status": "not_reviewed",
+        "evidence_url": null,
+        "reviewed_at": null
+      },
+      "evidence_urls": [],
+      "benchmark_ids": [],
+      "integration_test_refs": [],
+      "adoption_status": "discovered",
+      "approval_ref": null,
+      "duplicate_of": null,
+      "reviewer_notes": "Reference list; review freshness and each linked tool independently."
+    },
+    {
+      "id": "awesome-appsec-list",
+      "name": "Awesome AppSec",
+      "kind": "security-reference-list",
+      "category": "security",
+      "canonical_url": "https://github.com/paragonie/awesome-appsec",
+      "source_id": "sindresorhus-awesome",
+      "source_list_url": "https://github.com/sindresorhus/awesome",
+      "source_revision": null,
+      "reviewed_at": "2026-11-02",
+      "license": {
+        "identifier": null,
+        "status": "not_reviewed",
+        "evidence_url": null
+      },
+      "maintenance_status": "not_assessed",
+      "maintenance_evidence_url": null,
+      "dependencies": [],
+      "expected_benefit": "Reference material for secure development and application security testing.",
+      "integration_surface": "Research reference only.",
+      "cost_model": "No direct runtime cost; downstream tools need independent review.",
+      "security_review": {
+        "status": "not_reviewed",
+        "evidence_url": null,
+        "reviewed_at": null
+      },
+      "evidence_urls": [],
+      "benchmark_ids": [],
+      "integration_test_refs": [],
+      "adoption_status": "discovered",
+      "approval_ref": null,
+      "duplicate_of": null,
+      "reviewer_notes": "List metadata may be stale; check latest revisions before relying on individual entries."
+    },
+    {
+      "id": "awesome-postgres-list",
+      "name": "Awesome PostgreSQL",
+      "kind": "database-reference-list",
+      "category": "database-reliability",
+      "canonical_url": "https://github.com/dhamaniasad/awesome-postgres",
+      "source_id": "sindresorhus-awesome",
+      "source_list_url": "https://github.com/sindresorhus/awesome",
+      "source_revision": null,
+      "reviewed_at": "2026-11-02",
+      "license": {
+        "identifier": null,
+        "status": "not_reviewed",
+        "evidence_url": null
+      },
+      "maintenance_status": "not_assessed",
+      "maintenance_evidence_url": null,
+      "dependencies": [],
+      "expected_benefit": "Reference material for PostgreSQL administration, migration, backup and diagnostics.",
+      "integration_surface": "Research reference only.",
+      "cost_model": "No direct runtime cost; downstream tools need independent review.",
+      "security_review": {
+        "status": "not_reviewed",
+        "evidence_url": null,
+        "reviewed_at": null
+      },
+      "evidence_urls": [],
+      "benchmark_ids": [],
+      "integration_test_refs": [],
+      "adoption_status": "discovered",
+      "approval_ref": null,
+      "duplicate_of": null,
+      "reviewer_notes": "Each linked utility requires independent license, security and cost review."
+    }
+  ]
+}

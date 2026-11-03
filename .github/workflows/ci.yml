@@ -1,0 +1,142 @@
+name: uneXpected v8 command center CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  runtime-tests:
+    runs-on: ubuntu-latest
+    env:
+      TEST_POSTGRES_DSN: postgresql://unexpected:test-password@localhost:5432/unexpected_test
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: unexpected
+          POSTGRES_PASSWORD: test-password
+          POSTGRES_DB: unexpected_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U unexpected -d unexpected_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install runtime dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
+      - name: Compile runtime
+        run: python -m compileall -q unexpected_runtime
+      - name: Validate resource and quality scenario contracts
+        run: |
+          python -m json.tool unexpected_runtime/data/resource_catalog.json >/dev/null
+          python -m json.tool unexpected_runtime/data/quality_scenarios.json >/dev/null
+          python -m unexpected_runtime.cli resources --validate
+      - name: Apply PostgreSQL migrations to ephemeral CI database
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import psycopg
+          dsn = os.environ["TEST_POSTGRES_DSN"]
+          with psycopg.connect(dsn, autocommit=True) as connection:
+              for migration in sorted(Path("migrations").glob("*.sql")):
+                  connection.execute(migration.read_text(encoding="utf-8"), prepare=False)
+                  print(f"Applied {migration}")
+          PY
+      - name: Build v8 source integrity fixture
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from zipfile import ZIP_DEFLATED, ZipFile
+          import os
+          root = Path.cwd()
+          target = Path(os.environ['RUNNER_TEMP']) / 'uneXpected_v8_command_center.zip'
+          with ZipFile(target, 'w', ZIP_DEFLATED) as archive:
+              for path in sorted(root.rglob('*')):
+                  if not path.is_file() or '__pycache__' in path.parts or path.suffix in {'.pyc', '.sqlite3', '.db'}:
+                      continue
+                  relative = path.relative_to(root)
+                  if any(part in {'.git', '.venv', 'venv', 'state'} for part in relative.parts):
+                      continue
+                  if relative.name == '.env' or (relative.name.startswith('.env.') and relative.name != '.env.example'):
+                      continue
+                  archive.write(path, Path('uneXpected_v8') / relative)
+          print(f'Built {target} ({target.stat().st_size} bytes)')
+          PY
+          echo "UNEXPECTED_PACKAGE_ZIP=$RUNNER_TEMP/uneXpected_v8_command_center.zip" >> "$GITHUB_ENV"
+      - name: Run regression and security suite
+        run: python -m unittest discover -s tests -v
+      - name: Build single-process Docker image
+        run: docker build --pull -t unexpected-v8-command-center:ci .
+      - name: Boot container and smoke-test the actual image
+        run: |
+          set -euo pipefail
+          docker run -d --name unexpected-v8-smoke -p 10000:10000 \
+            -e UNEXPECTED_STORAGE_BACKEND=sqlite \
+            -e UNEXPECTED_STATE_DIR=/tmp/uneXpected-smoke \
+            -e UNEXPECTED_DEFAULT_PROVIDER=mock \
+            -e UNEXPECTED_RUNTIME_API_TOKEN=ci-container-token-0123456789abcdef0123456789abcdef \
+            unexpected-v8-command-center:ci
+          cleanup() { docker logs unexpected-v8-smoke || true; docker rm -f unexpected-v8-smoke >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          python - <<'PY'
+          import json, time, urllib.error, urllib.request
+          base = "http://127.0.0.1:10000"
+          token = "ci-container-token-0123456789abcdef0123456789abcdef"
+          for attempt in range(30):
+              try:
+                  with urllib.request.urlopen(base + "/health", timeout=2) as response:
+                      health = json.loads(response.read())
+                  break
+              except Exception:
+                  if attempt == 29:
+                      raise
+                  time.sleep(1)
+          assert health["ok"] is True, health
+          with urllib.request.urlopen(base + "/", timeout=5) as response:
+              assert b"uneXpected" in response.read()
+          try:
+              urllib.request.urlopen(base + "/v1/status", timeout=5)
+              raise AssertionError("Protected status endpoint unexpectedly allowed anonymous access.")
+          except urllib.error.HTTPError as error:
+              assert error.code == 401
+          headers = {"Authorization": "Bearer " + token, "Content-Type": "application/json"}
+          request = urllib.request.Request(base + "/v1/agents", headers=headers)
+          with urllib.request.urlopen(request, timeout=5) as response:
+              agents = json.loads(response.read())
+          assert agents["count"] == 38, agents.get("count")
+          payload = json.dumps({"agent_id":"orchestrator","objective":"Container image smoke test"}).encode()
+          request = urllib.request.Request(base + "/v1/invoke", data=payload, headers=headers, method="POST")
+          with urllib.request.urlopen(request, timeout=20) as response:
+              result = json.loads(response.read())["result"]
+          assert result["status"] == "completed", result
+          print("Container smoke passed: health, UI, auth, 38 agents and task invocation.")
+          PY
+      - name: CLI smoke tests
+        run: |
+          python -m unexpected_runtime.cli status
+          python -m unexpected_runtime.cli list
+          python -m unexpected_runtime.cli eval
+          python -m unexpected_runtime.cli resources --validate
+          python - <<'PY'
+          import json, subprocess, sys
+          result = subprocess.run(
+              [sys.executable, "-m", "unexpected_runtime.cli", "quality-eval", "--provider-route", "mock"],
+              text=True, capture_output=True, check=False,
+          )
+          assert result.returncode == 3, (result.returncode, result.stdout, result.stderr)
+          report = json.loads(result.stdout)
+          assert report["status"] == "blocked", report
+          assert report["execution_mode"] == "live", report
+          PY

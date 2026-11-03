@@ -1,0 +1,224 @@
+[
+  {
+    "legacy_path": "/uneXpected/agents/orchestrator.md",
+    "canonical_agent_id": "orchestrator",
+    "disposition": "kept",
+    "reason": "Kept as a distinct responsibility: Route a goal into the smallest safe task graph, coordinate handoffs and synthesize one result."
+  },
+  {
+    "legacy_path": "/uneXpected/agents/research-scout.md",
+    "canonical_agent_id": "research-scout",
+    "disposition": "kept",
+    "reason": "Kept as a distinct responsibility: Run a fast, scoped evidence scan and return the best primary sources and known unknowns."
+  },
+  {
+    "legacy_path": "/uneXpected/agents/deep-research.md",
+    "canonical_agent_id": "deep-research",
+    "disposition": "kept",
+    "reason": "Kept as a distinct responsibility: Investigate multi-part questions with explicit subquestions, competing hypotheses and evidence grading."
+  },
+  {
+    "legacy_path": "/uneXpected/agents/web-scout.md",
+    "canonical_agent_id": "web-scout",
+    "disposition": "kept",
+    "reason": "Kept as a distinct responsibility: Verify specific claims, dates, quotes, source credibility and link validity."
+  },
+  {
+    "legacy_path": "/uneXpected/agents/coding-engineer.md",
+    "canonical_agent_id": "coding-engineer",
+    "disposition": "kept",
+    "reason": "Kept as a distinct responsibility: Implement and refactor software with runnable code, error handling and tests."
+  },
+  {
+    "legacy_path": "/uneXpected/agents/system-architect.md",
+    "canonical_agent_id": "system-architect",
+    "disposition": "kept",
+    "reason": "Kept as a distinct responsibility: Design components, interfaces, data flows, deployment boundaries and failure modes."
+  },
+  {
+    "legacy_path": "/uneXpected/agents/debugger.md",
+    "canonical_agent_id": "debugger",
+    "disposition": "kept",
+    "reason": "Kept as a distinct responsibility: Isolate root cause using reproducible symptoms, logs and discriminating tests."
+  },
+  {
+    "legacy_path": "/uneXpected/agents/code-reviewer.md",
+    "canonical_agent_id": "code-reviewer",
+    "disposition": "kept",
+    "reason": "Kept as a distinct responsibility: Assess correctness, security, maintainability and regression risk independently of implementation."
+  },
+  {
+    "legacy_path": "/uneXpected/agents/data-analyst.md",
+    "canonical_agent_id": "data-analyst",
+    "disposition": "kept",
+    "reason": "Kept as a distinct responsibility: Inspect datasets, validate quality and produce reproducible calculations and decision-useful summaries."
+  },
+  {
+    "legacy_path": "/uneXpected/agents/document-rag.md",
+    "canonical_agent_id": "document-rag",
+    "disposition": "kept",
+    "reason": "Kept as a distinct responsibility: Answer questions grounded in user files with precise citations and contradiction tracking."
+  },
+  {
+    "legacy_path": "/uneXpected/agents/business-strategist.md",
+    "canonical_agent_id": "business-strategist",
+    "disposition": "kept",
+    "reason": "Kept as a distinct responsibility: Evaluate business models, customer value, operating model, economics and validation experiments."
+  },
+  {
+    "legacy_path": "/uneXpected/agents/competitor-intel.md",
+    "canonical_agent_id": "competitor-intel",
+    "disposition": "kept",
+    "reason": "Kept as a distinct responsibility: Compare competitors using current public evidence and identify defensible gaps."
+  },
+  {
+    "legacy_path": "/uneXpected/agents/marketing-seo.md",
+    "canonical_agent_id": "marketing-seo",
+    "disposition": "kept",
+    "reason": "Kept as a distinct responsibility: Plan search-led content, positioning, editorial calendars and measurable campaigns."
+  },
+  {
+    "legacy_path": "/uneXpected/agents/sales-intel.md",
+    "canonical_agent_id": "sales-intel",
+    "disposition": "kept",
+    "reason": "Kept as a distinct responsibility: Structure prospect qualification, account research, pipeline insights and outreach experiments."
+  },
+  {
+    "legacy_path": "/uneXpected/agents/finance-coach.md",
+    "canonical_agent_id": "finance-coach",
+    "disposition": "kept",
+    "reason": "Kept as a distinct responsibility: Build budgets, cash-flow scenarios and savings plans with transparent assumptions."
+  },
+  {
+    "legacy_path": "/uneXpected/agents/investment-research.md",
+    "canonical_agent_id": "investment-research",
+    "disposition": "kept",
+    "reason": "Kept as a distinct responsibility: Analyze investments, risk factors and scenarios without executing trades."
+  },
+  {
+    "legacy_path": "/uneXpected/agents/legal-scout.md",
+    "canonical_agent_id": "legal-scout",
+    "disposition": "kept",
+    "reason": "Kept as a distinct responsibility: Research legal/regulatory questions by jurisdiction and date with primary-source grounding."
+  },
+  {
+    "legacy_path": "/uneXpected/agents/career-coach.md",
+    "canonical_agent_id": "career-coach",
+    "disposition": "kept",
+    "reason": "Kept as a distinct responsibility: Tailor career materials and interview practice while preserving the user's actual history."
+  },
+  {
+    "legacy_path": "/uneXpected/agents/learning-coach.md",
+    "canonical_agent_id": "learning-coach",
+    "disposition": "kept",
+    "reason": "Kept as a distinct responsibility: Teach a topic with scaffolded explanations, practice and feedback loops."
+  },
+  {
+    "legacy_path": "/uneXpected/agents/travel-planner.md",
+    "canonical_agent_id": "travel-planner",
+    "disposition": "kept",
+    "reason": "Kept as a distinct responsibility: Build feasible itineraries using current opening hours, geography, budget and transit constraints."
+  },
+  {
+    "legacy_path": "/uneXpected/agents/maintenance-engineer.md",
+    "canonical_agent_id": "maintenance-engineer",
+    "disposition": "kept",
+    "reason": "Kept as a distinct responsibility: Diagnose industrial equipment faults through safe isolation, structured measurements and OEM guidance."
+  },
+  {
+    "legacy_path": "/uneXpected/agents/creative-director.md",
+    "canonical_agent_id": "creative-director",
+    "disposition": "kept",
+    "reason": "Kept as a distinct responsibility: Create coherent brand direction, naming, messaging and creative briefs."
+  },
+  {
+    "legacy_path": "/uneXpected/agents/ux-reviewer.md",
+    "canonical_agent_id": "ux-reviewer",
+    "disposition": "kept",
+    "reason": "Kept as a distinct responsibility: Review usability, information architecture, accessibility and interaction clarity."
+  },
+  {
+    "legacy_path": "/uneXpected/agents/product-manager.md",
+    "canonical_agent_id": "product-manager",
+    "disposition": "kept",
+    "reason": "Kept as a distinct responsibility: Turn user problems into requirements, prioritization, roadmap and measurable acceptance criteria."
+  },
+  {
+    "legacy_path": "/uneXpected/agents/project-manager.md",
+    "canonical_agent_id": "project-manager",
+    "disposition": "kept",
+    "reason": "Kept as a distinct responsibility: Plan work, manage scope, dependencies, risks, milestones and closeout."
+  },
+  {
+    "legacy_path": "/uneXpected/agents/browser-operator.md",
+    "canonical_agent_id": "browser-operator",
+    "disposition": "kept",
+    "reason": "Kept as a distinct responsibility: Plan or execute supported multi-step browser actions with page-content distrust and confirmation gates."
+  },
+  {
+    "legacy_path": "/uneXpected/agents/media-producer.md",
+    "canonical_agent_id": "media-producer",
+    "disposition": "kept",
+    "reason": "Kept as a distinct responsibility: Produce scripts, storyboards, narration text, shot lists, edit plans and publishing metadata."
+  },
+  {
+    "legacy_path": "/uneXpected/agents/meeting-analyst.md",
+    "canonical_agent_id": "meeting-analyst",
+    "disposition": "kept",
+    "reason": "Kept as a distinct responsibility: Convert meeting notes/transcripts into decisions, action items, owners and unresolved issues."
+  },
+  {
+    "legacy_path": "/uneXpected/agents/knowledge-curator.md",
+    "canonical_agent_id": "knowledge-curator",
+    "disposition": "kept",
+    "reason": "Kept as a distinct responsibility: Organize durable project knowledge, provenance, deduplication, retention and retrieval boundaries."
+  },
+  {
+    "legacy_path": "/uneXpected/agents/security-reviewer.md",
+    "canonical_agent_id": "security-reviewer",
+    "disposition": "kept",
+    "reason": "Kept as a distinct responsibility: Threat-model systems and workflows; review least privilege, secrets, data flow and supply-chain risk."
+  },
+  {
+    "legacy_path": "/uneXpected/agents/rag-engineer.md",
+    "canonical_agent_id": "rag-engineer",
+    "disposition": "kept",
+    "reason": "Kept as a distinct responsibility: Design and implement retrieval, chunking, indexing, ranking, citations, evaluation and refresh pipelines."
+  },
+  {
+    "legacy_path": "/uneXpected/agents/automation-architect.md",
+    "canonical_agent_id": "automation-architect",
+    "disposition": "kept",
+    "reason": "Kept as a distinct responsibility: Design event-triggered workflows with typed contracts, idempotency, approvals, observability and rollback."
+  },
+  {
+    "legacy_path": "/uneXpected/agents/startup-due-diligence.md",
+    "canonical_agent_id": "startup-due-diligence",
+    "disposition": "kept",
+    "reason": "Kept as a distinct responsibility: Assess a company/project across market, product, team, financial, legal, operational and technical risks."
+  },
+  {
+    "legacy_path": "/uneXpected/agents/health-info.md",
+    "canonical_agent_id": "health-info",
+    "disposition": "kept",
+    "reason": "Kept as a distinct responsibility: Explain health information, prepare questions and distinguish general guidance from urgent red flags."
+  },
+  {
+    "legacy_path": "/uneXpected/agents/always-on-planner.md",
+    "canonical_agent_id": "always-on-planner",
+    "disposition": "kept",
+    "reason": "Kept as a distinct responsibility: Specify a real monitoring plan with source, schedule, thresholds, deduplication, alert channel and failure behavior."
+  },
+  {
+    "legacy_path": "/uneXpected/agents/voice-agent.md",
+    "canonical_agent_id": "voice-agent",
+    "disposition": "kept",
+    "reason": "Kept as a distinct responsibility: Design voice dialogue, turn-taking, recovery, accessibility, escalation and voice evaluation."
+  },
+  {
+    "legacy_path": "/uneXpected/agents/game-agent.md",
+    "canonical_agent_id": "game-agent",
+    "disposition": "kept",
+    "reason": "Kept as a distinct responsibility: Design game strategies, rules, search methods, simulations and evaluation metrics."
+  }
+]

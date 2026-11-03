@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="dark">
+<title>uneXpected — Command Center</title>
+<link rel="stylesheet" href="/assets/styles.css"><script src="/assets/app.js" defer></script>
+</head>
+<body>
+<div class="shell">
+<aside class="sidebar">
+<a class="brand" href="/"><span class="mark">u<span>.</span></span><span><b>uneXpected</b><small>COMMAND CENTER</small></span></a>
+<p class="eyebrow">WORKSPACE</p>
+<nav aria-label="Main navigation">
+<a class="nav active" href="#overview" data-view="overview">◈ Overview</a>
+<a class="nav" href="#agents" data-view="agents">◎ Agent registry <b id="nav-count">38</b></a>
+<a class="nav" href="#tasks" data-view="tasks">▤ Tasks & workflows</a>
+<a class="nav" href="#providers" data-view="providers">⌘ AI providers</a>
+<a class="nav" href="#capabilities" data-view="capabilities">⌬ Capabilities</a>
+<a class="nav" href="#intelligence" data-view="intelligence">⌕ Resource & AI quality</a>
+<a class="nav" href="#governance" data-view="governance">⬡ Governance</a>
+<a class="nav" href="#audit" data-view="audit">≋ Audit & learning</a>
+</nav>
+<div class="side-bottom"><span id="side-dot" class="dot"></span><span id="side-health">Connecting…</span><small>GOVERNED RUNTIME <b id="version">—</b></small></div>
+</aside>
+<main>
+<header class="topbar"><div><p class="eyebrow">UNIFIED OPERATIONS</p><h1 id="page-title">System overview</h1></div><div class="top-actions"><span id="connection">● Connecting</span><button id="refresh" class="button secondary">↻ Refresh</button></div></header>
+<section class="view active" id="view-overview">
+<div class="hero"><div><p class="eyebrow">THE SYSTEM, IN ONE PLACE</p><h2>One command center.<br><span>One governed runtime.</span></h2><p>Inspect the real state of uneXpected, route work through its specialist registry, and follow every task through verification and learning.</p></div><div class="hero-symbol">u<span>.</span></div></div>
+<div class="metrics">
+<article><label>SYSTEM HEALTH</label><strong id="metric-health">Checking</strong><small id="health-note">Waiting for runtime status</small></article>
+<article><label>REGISTERED ROLES</label><strong id="metric-agents">—</strong><small>Canonical specialist registry</small></article>
+<article><label>AI PROVIDER</label><strong id="metric-provider">—</strong><small id="provider-note">Not verified</small></article>
+<article><label>GOVERNANCE</label><strong>Fail closed</strong><small>Privileged actions disabled by default</small></article>
+</div>
+<div class="heading"><div><p class="eyebrow">LIVE SYSTEM VIEW</p><h3>Operational control</h3></div><small id="updated">Not refreshed yet</small></div>
+<div class="columns">
+<article class="panel"><h3>Seven-stage workflow</h3><p>Every task follows the same governed path.</p><div class="stages"><span>01<b>Request</b></span><span>02<b>Plan</b></span><span>03<b>Execute</b></span><span>04<b>Verify</b></span><span>05<b>Improve</b></span><span>06<b>Deliver</b></span><span>07<b>Learn</b></span></div><small>Delivery is blocked when verification fails. External write actions require separate approvals.</small></article>
+<article class="panel"><h3>Runtime readiness</h3><div id="readiness" class="list">Loading verified status…</div></article>
+</div>
+<div class="heading"><div><p class="eyebrow">RECENT ACTIVITY</p><h3>Task and audit stream</h3></div><a href="#tasks" data-view="tasks">View tasks ↗</a></div>
+<article class="panel"><div id="recent-events" class="list">Loading events…</div></article>
+</section>
+<section class="view" id="view-agents"><div class="heading"><div><p class="eyebrow">SPECIALIST ECOSYSTEM</p><h3>38 canonical roles</h3><p>Governed specifications routed by one coordinator—not separate autonomous services.</p></div><input id="agent-search" type="search" placeholder="Search roles…"></div><div id="agent-grid" class="cards">Loading agent registry…</div></section>
+<section class="view" id="view-tasks"><div class="heading"><div><p class="eyebrow">EXECUTION CONTROL</p><h3>Submit a governed task</h3><p>Tasks are executed by the canonical coordinator and recorded in shared state.</p></div></div><article class="panel task-panel"><form id="task-form"><label for="task-agent">Specialist role</label><select id="task-agent"></select><label for="task-objective">What should uneXpected do?</label><textarea id="task-objective" rows="4" maxlength="16000" required placeholder="Describe the objective, context and expected result…"></textarea><label for="task-mode">Execution mode</label><select id="task-mode"><option value="invoke" selected>Single governed invocation (runtime test)</option><option value="lifecycle" disabled>Full verified lifecycle (requires a live AI provider)</option></select><label for="task-provider">Provider route</label><select id="task-provider"><option value="">Default configured route</option></select><button class="button primary" id="task-submit">Run task →</button><small>Publishing, spending, payments, account changes and other privileged actions are not authorized by this form.</small></form><div id="task-result" aria-live="polite"></div></article><div class="heading"><h3>Recent tasks</h3></div><article class="panel"><div id="task-list" class="list">Loading tasks…</div></article><article class="panel" id="task-trace-panel" hidden><div class="heading"><div><p class="eyebrow">PERSISTED EXECUTION HISTORY</p><h3 id="trace-title">Task trace</h3><p>Read-only event history. Reconnecting never reruns the task.</p></div><button class="button secondary" id="trace-load-more" type="button" hidden>Load older events</button></div><div id="trace-events" class="list">Select a task to inspect its trace.</div></article></section>
+<section class="view" id="view-providers"><div class="heading"><div><p class="eyebrow">MODEL ROUTING</p><h3>Provider readiness</h3><p>Configured, reachable and verified are separate states. No key is shown here.</p></div></div><div id="provider-grid" class="cards">Loading provider status…</div><article class="panel"><h3>Provider safety</h3><p>A configured credential does not prove connectivity. A provider is marked verified only after a successful bounded live request. Mock responses are never labelled as live.</p></article></section>
+<section class="view" id="view-capabilities"><div class="heading"><div><p class="eyebrow">INTEGRATION INVENTORY</p><h3>Capabilities & integrations</h3><p>Catalog metadata is not proof of installation, authorization or live access.</p></div></div><article class="panel"><div id="capability-list" class="list">Loading capabilities…</div></article></section>
+<section class="view" id="view-intelligence">
+<div class="heading"><div><p class="eyebrow">RESEARCH & QUALITY CONTROL</p><h3>Resource Intelligence and AI quality</h3><p>Awesome is a permanent research source. Candidates are not installed or trusted by discovery alone.</p></div></div>
+<div class="columns">
+<article class="panel"><h3>Curated resource registry</h3><p>Provenance, license status and adoption state are recorded independently for each candidate.</p><div id="resource-list" class="list">Loading resource catalog…</div></article>
+<article class="panel"><h3>Run bounded AI quality checks</h3><p>Runs the fixed scenario suite through the existing Coordinator. A verified non-mock provider is required; fixture tests are never shown as live model quality.</p>
+<form id="quality-evaluation-form" class="quality-form">
+<label for="quality-provider">Verified live provider route</label>
+<select id="quality-provider" required><option value="">Select a verified live route</option></select>
+<button class="button primary" id="quality-evaluation-submit">Run quality suite →</button>
+<small>Read-only scenarios only. No external tools, publishing, messaging, payments, deployment or account changes. Provider usage may consume model credits.</small>
+</form><div id="quality-evaluation-result" aria-live="polite"></div></article>
+</div>
+<div class="heading"><div><p class="eyebrow">EVALUATION EVIDENCE</p><h3>Recent AI quality runs</h3></div></div>
+<article class="panel"><div id="quality-evaluation-list" class="list">Loading evaluation history…</div></article>
+</section>
+<section class="view" id="view-governance"><div class="heading"><div><p class="eyebrow">SAFETY BOUNDARY</p><h3>Governance & approvals</h3></div></div><div class="metrics"><article><label>PRIVILEGED EXECUTION</label><strong class="warning">DISABLED</strong><small>Fail-closed policy</small></article><article><label>APPROVAL AUTHORITY</label><strong id="approval-state">Not verified</strong><small>Durable one-use approval gate</small></article><article><label>REPLAY PROTECTION</label><strong id="replay-state">Not verified</strong><small>Transactional consumption</small></article><article><label>RECOVERY</label><strong id="recovery-state">Not verified</strong><small>Backup and restore evidence</small></article></div><article class="panel"><h3>Approval records</h3><p>Read-only view. This command center cannot self-approve actions.</p><div id="approval-list" class="list">Loading approval state…</div></article></section>
+<section class="view" id="view-audit"><div class="heading"><div><p class="eyebrow">TRACEABILITY & IMPROVEMENT</p><h3>Audit and learning</h3></div></div><article class="panel"><h3>Recent events</h3><div id="audit-events" class="list">Loading events…</div></article><article class="panel"><h3>Propose a system improvement</h3><p>Creates a reviewable proposal only. It does not change an active agent version.</p><form id="proposal-form" class="proposal-form"><label for="proposal-agent">Agent</label><select id="proposal-agent"></select><label for="proposal-benchmark">Existing baseline ID</label><input id="proposal-benchmark" required maxlength="120" placeholder="Benchmark identifier"><label for="proposal-instruction">Candidate instruction</label><textarea id="proposal-instruction" rows="4" maxlength="20000" required placeholder="Proposed revised agent instruction…"></textarea><label for="proposal-changes">Change rationale</label><textarea id="proposal-changes" rows="3" maxlength="5000" required placeholder="What should improve and why?"></textarea><button class="button primary" id="proposal-submit">Create proposal</button><small>Protected changes remain subject to independent evaluation and authenticated approval. Promotion and rollback are not exposed here.</small></form><div id="proposal-result" aria-live="polite"></div></article><article class="panel"><h3>Improvement proposals</h3><p>Proposals are not automatically promoted.</p><div id="improvement-list" class="list">Loading proposals…</div></article></section>
+<footer>uneXpected v8 · One application · One coordinator · One source of truth</footer>
+</main></div>
+<div class="auth-overlay" id="auth-overlay"><form id="auth-form"><h2>Connect to uneXpected</h2><p>Enter the command-center access token. It stays in this tab's memory and is not saved.</p><label for="auth-token">Access token</label><input id="auth-token" type="password" autocomplete="off" required><button class="button primary">Connect securely</button><small id="auth-error"></small></form></div>
+<div id="toast" role="status" aria-live="polite"></div>
+</body></html>

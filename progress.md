@@ -1,0 +1,64 @@
+Plan: docs/plans/2026-11-02-unexpected-v8-single-command-center.md
+
+Task 1: completed
+- Desktop command-center shell and same-origin read APIs implemented.
+- Authenticated reads, static-asset traversal protection, and explicit /mobile/ 404 verified.
+
+Task 2: openox_configured_unverified; provider_diagnostics_deployed
+- Native Anthropic, OpenAI/OpenRouter Chat Completions, and OpenOx Responses API adapters implemented. OpenOx route is registered only when OPENOX_API_KEY is present; it defaults to gpt-6-astra and remains unverified until the bounded provider test succeeds.
+- Per-task route selection remains immutable across concurrent requests and full lifecycle stages.
+- Bounded live provider-test endpoint and provider provenance audit events implemented.
+- Provider route, concurrent routing, coordinator, lifecycle and HTTP tests pass.
+- Render v8 is configured with OPENOX_BASE_URL=https://api.openoxai.com/v1, OPENOX_MODEL=gpt-6-astra and UNEXPECTED_DEFAULT_PROVIDER=openox. Live /health reports provider=openox and provider_configured=true; a non-empty key is configured, but its validity and model entitlements are not yet verified. Seven authenticated OpenOx Test connection attempts on 2026-11-02 14:43–14:45 UTC failed as ProviderError; earlier code omitted upstream status/body. Deployment 1cfa531 now exposes a bounded upstream HTTP status, error code and message with API-key redaction. Retest is required to identify the exact cause; lifecycle remains gated until verified=true.
+
+Task 3: adapter_and_manual_branch_recovery_verified; scheduled_backup_pending
+- PostgreSQL StateStore adapter, PostgreSQL idempotency mixin, and PostgreSQL one-use approval ledger implemented.
+- Fresh-database migrations 001 and 002 and Python psycopg adapter are exercised in ephemeral PostgreSQL 16 CI.
+- Neon branch v8-migration-test (br-young-resonance-b9unjqzy) has migration 002 applied and verified; duplicate idempotency and approval consumption are rejected.
+- Manual Neon branch-recovery test passed with isolated test rows only.
+- New Render v8 runtime returned /health HTTP 200 with storage=ready, verifying a live database query.
+- Original Neon main branch remains at schema version 1; no production schema was changed.
+- Remaining: establish scheduled/manual backup policy and restore rehearsal on actual runtime data.
+
+Task 4: desktop_command_center_live; authenticated_browser_session_pending
+- Task submission, task detail, task/event history, provider status/selection/testing, capabilities, governance visibility and improvement proposal controls are connected to the same Coordinator/API.
+- GitHub Actions full HTTP integration verifies health, authentication, all 38 agents, task invocation, task detail, provider provenance, idempotent replay, desktop UI and /mobile/ 404.
+- Public live checks on the v8 service:
+  * /health HTTP 200, version=8.0.0-preview, storage=ready, authentication_configured=true, privileged_actions=fail-closed.
+  * / HTTP 200, title uneXpected — Command Center.
+  * /assets/app.js HTTP 200.
+  * /assets/styles.css HTTP 200.
+  * /mobile/ HTTP 404.
+- Owner-authenticated provider-test calls were recorded in the hosted PostgreSQL event log. The runtime bearer token remains in Render private settings and is never requested in chat.
+- Promotion, rollback and privileged approval actions are not exposed.
+
+Task 5: single_service_live; final_manual_settings_pending
+- Single-process Python Dockerfile copies all manifest-pinned skill sources, including self_improvement/.
+- Latest GitHub Actions run 41466139862 passed **197 tests, 1 skipped**, real PostgreSQL integration, Docker build, actual container smoke test (health, UI, auth, 38 agents, task invocation) and CLI smoke tests.
+- New Render service: unexpected-v8-command-center (srv-dbk8217b9u1s73ftauig), free Frankfurt, branch feat/unified-v8-foundation, auto-deploy disabled.
+- Latest v8 deployment dep-dbka85fb9u1s7383fkqg is live at commit 1cfa531b2feef9dd4533617f06cca8d72e17b080, adding safe provider-test diagnostics.
+- DATABASE_URL for isolated Neon v8-migration-test branch and a 96-character access token are stored directly in Render private environment settings.
+- Render v8 Health Check Path is configured as /health and read back from the service configuration.
+- OpenOx is the configured default route and /health reports provider_configured=true; successful live verification has not yet passed. The full lifecycle is server-side blocked until the selected provider is verified.
+- Existing AI Studio, v7.3.1 runtime test and old v8 unified test services are untouched pending cutover acceptance.
+
+Execution boundary:
+- Work remains on feat/unified-v8-foundation; PR #11 remains draft and is not merged.
+- The v8 service's non-secret provider settings and health-check path were updated. No secret values were read or exposed. Older Render services and the parent Neon main schema remain untouched.
+- New v8 Render service uses isolated Neon test branch, not the parent branch.
+- Phone/PWA is excluded from v8. Legacy source is retained only for rollback.
+- Consequential actions remain disabled until durable approval, replay, backup and restore gates pass and the owner separately approves activation.
+
+
+## Resource Intelligence and AI Quality Evaluation — completed
+
+Plan: docs/plans/2026-11-02-resource-intelligence-ai-quality-evaluation.md
+Specification: docs/specs/2026-11-02-resource-intelligence-ai-quality-evaluation-design.md
+
+- Resource Intelligence: read-only Awesome source index and six reference candidates; per-project license, maintenance and security states remain unverified; discovery does not install or authorize. CLI and authenticated command-center API/view are connected.
+- AI Quality Evaluation: versioned six-category scenario suite, bounded Coordinator runner, deterministic checks, failure taxonomy, secret-minimized reports and comparable passing-baseline regression detection are implemented. Live runs require an explicit configured/verified non-mock provider before task creation.
+- Quality history and resource catalog are exposed through the existing single command-center UI; no separate interface/service/role was added.
+- GitHub Actions run #467 (ID 41503472451) passed on code/inventory commit 46750b3fe0498e2c08159946d110231046465b50: 218 tests passed, 1 optional v6 fixture skip. PostgreSQL 16 migrations, SHA-256 integrity, Docker build, actual-container health/auth/38-role/task smoke, and CLI quality mock-rejection checks passed.
+- CI used deterministic test fixtures. No live model-quality run has been executed. No new dependency or migration was added.
+
+Execution boundary remains unchanged: PR #11 is open and draft; no merge, Render deploy, old-service retirement, external project installation, paid resource or consequential-action activation. Approval/replay, backup/restore and recovery release gates remain in force.

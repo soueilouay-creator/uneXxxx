@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: unexpected-v8-command-center-preview
+    runtime: docker
+    plan: free
+    region: frankfurt
+    branch: feat/unified-v8-foundation
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeploy: false
+    envVars:
+      - key: UNEXPECTED_STORAGE_BACKEND
+        value: postgres
+      - key: UNEXPECTED_APPROVAL_LEDGER_BACKEND
+        value: postgres
+      - key: DATABASE_URL
+        sync: false
+      - key: UNEXPECTED_RUNTIME_API_TOKEN
+        generateValue: true
+      - key: UNEXPECTED_DEFAULT_PROVIDER
+        value: mock
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: OPENROUTER_MODEL
+        value: openrouter/free
+      - key: UNEXPECTED_MAX_WORKERS
+        value: "4"
+      - key: UNEXPECTED_MAX_RETRIES
+        value: "1"
+      - key: UNEXPECTED_STATE_DIR
+        value: /tmp/uneXpected-state

@@ -1,10 +1,10 @@
 services:
   - type: web
-    name: unexpected-v8-command-center-preview
+    name: unexpected-unified
     runtime: docker
     plan: free
     region: frankfurt
-    branch: feat/unified-v8-foundation
+    branch: unified-v1
     dockerfilePath: ./Dockerfile
     dockerContext: .
     healthCheckPath: /health

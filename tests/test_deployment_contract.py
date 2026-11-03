@@ -95,7 +95,8 @@ class DeploymentContractTests(unittest.TestCase):
         notices = (ROOT / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")
         upstream_license = ROOT / "third_party" / "licenses" / "awesome-llm-apps" / "LICENSE"
         self.assertIn("MIT License", license_text)
-        self.assertIn("THIRD_PARTY_NOTICES.md", notices)
+        self.assertIn("Apache License 2.0", notices)
+        self.assertIn("THIRD_PARTY_NOTICES.md", (ROOT / "README.md").read_text(encoding="utf-8"))
         self.assertTrue(upstream_license.is_file())
         self.assertIn("Apache License", upstream_license.read_text(encoding="utf-8"))
 

@@ -223,6 +223,11 @@
   }
   document.querySelectorAll("[data-view]").forEach(link=>link.addEventListener("click",e=>{e.preventDefault();const name=link.dataset.view;showView(name);history.replaceState(null,"","#"+name);}));
   $("refresh").addEventListener("click",refresh);
+  $("workflow-run-list").addEventListener("click",e=>{
+    const button=e.target.closest("[data-workflow-trace]");
+    if(!button)return;
+    loadTaskTrace(button.dataset.workflowTrace,0,false);
+  });
   $("task-list").addEventListener("click",e=>{
     const button=e.target.closest("[data-trace-task]");
     if(!button)return;

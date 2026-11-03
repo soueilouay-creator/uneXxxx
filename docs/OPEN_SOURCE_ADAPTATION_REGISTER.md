@@ -9,7 +9,7 @@ This public repository studies external architecture and workflow projects, but 
 | [LangGraph](https://github.com/langchain-ai/langgraph) | Public metadata and README report MIT; README describes durable execution, human-in-loop, memory and trace/debug. | Persistent checkpoints, approval interrupts, bounded recovery, audit events. | No LangGraph runtime dependency. |
 | [n8n](https://github.com/n8n-io/n8n) | README describes visual workflow canvas, approvals, observability and integrations; fair-code/Sustainable Use/Enterprise license. | Workflow catalogue UX and provenance-first design. | No n8n source, nodes, assets or templates. |
 | [MCP reference servers](https://github.com/modelcontextprotocol/servers) | README says reference implementations are educational and not production-ready. | Protocol boundary with scoped tools, provenance, limits and least privilege. | No reference server enabled by default. |
-| [awesome-llm-apps](https://github.com/Shubhamsaboo/awesome-llm-apps) | Upstream commit and license/provenance recorded in the v6→v7 crosswalk. | 120 candidates mapped to canonical v7 roles. | Not 120 extra agents or runnable deployments. |
+| [awesome-llm-apps](https://github.com/Shubhamsaboo/awesome-llm-apps) | Repository metadata reports Apache-2.0; workflow source links are pinned to upstream commit 6c16b23f1bacd0fdf240bb5141ef45e59e82c306. | 120 workflow candidates mapped to canonical v7 roles. | Not 120 extra agents or runnable deployments; no upstream application code is installed. |
 
 ## uneXpected integration contract
 
@@ -24,3 +24,6 @@ This public repository studies external architecture and workflow projects, but 
 ## Public-source and license policy
 
 The repository itself is public to support inspection and adaptation. Public visibility is not an open-source license grant. Reuse of third-party code, workflow text, designs, trademarks or media requires source-specific license and attribution review. The project-level license should only be declared after that audit is complete. External adapters stay disabled until credentials, user authorization, network access, pricing and tests are configured.
+
+
+The Apache-2.0 license text for the upstream awesome-llm-apps source is preserved under `third_party/licenses/awesome-llm-apps/LICENSE`. The workflow crosswalk and its derived catalogue retain source URLs and role mapping context. No other project's source code is bundled by this adaptation.

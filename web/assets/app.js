@@ -94,7 +94,9 @@
     lifecycleOption.textContent=hasConfiguredLiveProvider
       ? "Full verified lifecycle"
       : "Full verified lifecycle (requires a live AI provider)";
-    if(!hasConfiguredLiveProvider&&$("
+    if(!hasConfiguredLiveProvider&&$("task-mode").value==="lifecycle")$("task-mode").value="invoke";
+  }
+
   function renderWorkflowFilters(){
     const rows=(state.workflowCatalog||{}).workflows||[],categories=[...new Set(rows.map(x=>x.category).filter(Boolean))].sort(),roles=[...new Set(rows.flatMap(x=>[x.primary_agent_id,...(x.supporting_agent_ids||[])].filter(Boolean)))].sort();
     const c=$("workflow-category"),r=$("workflow-role"),oldC=c.value,oldR=r.value;
@@ -123,8 +125,6 @@
     $("skill-policy-note").innerHTML='<b>Skill activation policy</b><p>'+manual+' of '+list.length+' active Skills are explicitly user-invocable. Automatic Skills are selected by the runtime using the objective triggers and role scope. Skills do not independently grant permissions. The loader verifies SHA-256 content and does not execute packaged scripts.</p>';
     $("mcp-tool-grid").innerHTML=tools.length?tools.map(t=>'<article class="tool-card"><div class="workflow-card-top"><span class="category-tag">MCP adapter</span><span class="state '+(t.enabled?"ok":"")+'">'+esc(t.capability_status)+'</span></div><h4>'+esc(t.name)+'</h4><p>'+esc(t.description)+'</p><div class="skill-meta"><div><small>TOOL ID</small><b>'+esc(t.tool_id)+'</b></div><div><small>CAPABILITY</small><b>'+esc(t.capability_id)+'</b></div></div><b>Allowed roles</b><p>'+((t.allowed_agent_ids||[]).map(esc).join(", ")||"None")+'</p><b>Required permissions</b><p>'+((t.required_permissions||[]).map(esc).join(", ")||"None")+'</p><small>Source: '+esc(t.source_url)+' · '+esc(t.source_publisher)+' · v'+esc(t.version)+'</small></article>').join(""):'<article class="panel empty"><b>No MCP adapters registered</b><p>The MCP gateway boundary is implemented, but no external MCP server or tool adapter is installed, enabled or authorised. The current count is zero, not simulated.</p></article>';
     $("skills-capability-list").innerHTML=caps.length?caps.map(x=>row(x.name||x.capability_id,x.description||x.source_url||"",x.status||"unknown")).join(""):'<div class="empty">No capabilities are registered. Additions require provenance, licence, role scope and permission review.</div>';
-  }
-task-mode").value==="lifecycle")$("task-mode").value="invoke";
   }
   async function refresh() {
     $("refresh").disabled=true;

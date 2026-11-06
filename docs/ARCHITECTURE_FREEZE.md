@@ -6,6 +6,10 @@
 **Architecture line:** v8.1 preview; the package version is not being promoted by this document.  
 **Decision date:** 2026-11-06
 
+## Scope statements
+
+Phone/PWA is out of scope for v8. Remote MCP is not connected in the current runtime. Live provider verification is not yet evidenced by a current non-mock invocation.
+
 ## Decision
 
 Freeze the v8 topology as one Python application, one public HTTP/API boundary, one `Coordinator`, one canonical 38-role registry, one provider router, one authoritative runtime state layer and one desktop-first web command center.

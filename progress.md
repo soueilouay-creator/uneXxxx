@@ -62,3 +62,21 @@ Specification: docs/specs/2026-11-02-resource-intelligence-ai-quality-evaluation
 - CI used deterministic test fixtures. No live model-quality run has been executed. No new dependency or migration was added.
 
 Execution boundary remains unchanged: PR #11 is open and draft; no merge, Render deploy, old-service retirement, external project installation, paid resource or consequential-action activation. Approval/replay, backup/restore and recovery release gates remain in force.
+
+
+## 2026-11-06 current v8 operating audit — PR #4
+
+This dated audit supersedes earlier deployment/provider assertions above where they conflict. The prior progress notes refer to historical test services, feature branches and environment states; they are not proof of the current live v8 service state.
+
+- Canonical v8 repository: `soueilouay-creator/uneXxxx`; baseline `main` at `67d2587af7eee08e14c8c80acfeacff897170f0b`. The older Node/phone repository and older v7 repository are separate; neither is being edited or retired by this change.
+- The v8 repository already has one Python command-center process, a 38-role registry, no phone/PWA assets or routes in its packaged web runtime, and regression checks for those boundaries. No destructive phone-app deletion is required inside v8.
+- A proposed architecture freeze is recorded in `docs/ARCHITECTURE_FREEZE.md`. Draft PR #4 is the review boundary. No merge, deployment, Render environment edit, service retirement or production data mutation has been performed.
+- The baseline `main` CI run 41640135070 passed 258 tests with one optional fixture skip on 2026-11-03. It used deterministic mock output and ephemeral PostgreSQL CI; this is regression evidence, not live model or production recovery evidence.
+- Neon project `unexpected-v8-unified` primary branch currently has migrations 001 and 002, 15 public tables, and no task/event workload rows in the inspected tables. Separate rehearsal branches contain test rows; no fresh snapshot restore into the primary branch was proved. The current deployed Render workspace/service state is unverified because workspace selection is awaiting owner confirmation.
+- Provider adapters and `POST /v1/providers/test` exist, but no successful current non-mock authentication/invocation was observed. The default in the checked Render Blueprint is `mock`. Provider secrets were not read.
+- The MCP gateway is an in-process adapter boundary, not a remote MCP client. The current provider API returns text and has no general external provider tool-call loop. No remote MCP, Gmail, Calendar or Metricool adapter has been registered, enabled or verified in the v8 runtime. Skill `allowed_tools` metadata does not grant authorization.
+- The seven-stage lifecycle has deterministic fake-provider tests and CI proof; a non-mock model, authorized runtime tool and externally delivered result remain separate acceptance gates.
+- PR #4 adds the hash-pinned `industrial-maintenance-sales` Skill to the existing registry. It maps eight existing roles and has an empty `allowed_tools` list pending real adapters. The latest sales workbook read on 2026-11-06 08:07:24 Africa/Tunis recorded 49 prospects, 44 first touches, zero human replies, zero independently verified demos, zero quotes, zero wins and eight outstanding delivery/contact checks. This is a dated workbook snapshot, not a live inbox check.
+- External customer contact, follow-up, corrected-recipient retry, contact-form submission, quotation, social publishing, payment, provider spending, production deployment and destructive service/database action remain gated by the applicable explicit approval.
+
+Next acceptance gates: explicit Render workspace selection; non-secret service inspection; real bounded provider test; independent PostgreSQL write/read and backup/restore rehearsal; structured provider tool-call support and reviewed adapter implementation; non-mock seven-stage lifecycle with an authorized read-only tool; sales ledger reconciliation and genuine booked-demo evidence.

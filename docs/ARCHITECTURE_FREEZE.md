@@ -8,7 +8,7 @@
 
 ## Scope statements
 
-Phone/PWA is out of scope for v8. Remote MCP is not connected in the current runtime. Live provider verification is not yet evidenced by a current non-mock invocation.
+Phone/PWA is out of scope for v8. Remote MCP is not connected in the current runtime. Historical live OpenRouter use is evidenced on 2026-11-02, but a fresh provider check on 2026-11-06 has not been completed.
 
 ## Decision
 
@@ -48,17 +48,31 @@ The v8 repository already excludes phone/PWA files and includes regression check
 
 ### Provider authentication
 
-**Not yet verified in this audit.** Provider adapters and the bounded `/v1/providers/test` path exist. No successful current non-mock invocation has been observed in this audit. Do not mark a provider verified until its actual host-side test succeeds and the runtime reports `verified=true`. Secrets must remain in the host secret manager and must never be copied into chat, Git, the browser or task logs.
+**Historical success, current re-test pending.** The Neon `v8-migration-test` branch contains three `provider_verified` events for OpenRouter (`openrouter/free`) between 2026-11-02 16:47:18 and 19:01:23 UTC, plus 11 `provider_used` events with `mock=false` between 17:23:09 and 19:04:57 UTC. This is direct persisted evidence that the hosted v8 runtime made successful real OpenRouter calls at that time. The same branch contains 13 deterministic-mock calls. It also contains 13 failed OpenOx test events; the recorded diagnostic is HTTP 402 `insufficient_balance`. The latest OpenRouter invocation preceded the final 2026-11-02 19:20 UTC Render deployment, and no fresh authenticated provider test was completed on 2026-11-06. The checked-in Render Blueprint sets `UNEXPECTED_DEFAULT_PROVIDER=mock`, but the service's private environment was not readable through the available Render connector, so its effective current default is unverified. Treat OpenRouter as historically verified, OpenOx as blocked by balance, and all current provider readiness as pending a fresh host-side test. Do not expose credentials or mark a current provider verified without a successful fresh invocation.
 
 ### Persistence and recovery
 
-- The connected Neon project `unexpected-v8-unified` has a ready primary `main` branch with schema versions 1 and 2 and 15 public tables.
-- At the time of inspection the primary branch contained no task/event workload records. It must not be described as proven production persistence.
-- Separate rehearsal branches contain persisted test task/event/idempotency rows. This demonstrates writes to those test branches, not a fresh backup restore into the primary branch.
-- The current Neon Free plan was documented as lacking scheduled backup snapshots. A production-grade backup/export destination and restore rehearsal remain required before consequential writes are enabled.
-- No SQL mutation or destructive restore was performed during this audit.
+- Neon project `unexpected-v8-unified` primary `main` branch is ready, has schema migration version 2 and 15 public tables, but the inspected `tasks`, `events`, `idempotency_claims`, `consumed_approvals` and `workspace_records` tables all contain zero rows. This branch is not evidence of persisted live workload.
+- The `v8-migration-test` branch has migration version 2, 24 completed task rows and 139 events. Its records show 11 real OpenRouter calls, 13 deterministic mock calls and two workflow attempts that both ended `blocked_verification`, with `delivered=false`.
+- The primary `main` branch has one manual snapshot, `uneXpected-pre-v8-migration-2026-11-03`, created 2026-11-03 12:56:26 UTC. The branch's automatic snapshot schedule is empty. This snapshot is of the empty primary branch, not of the populated `v8-migration-test` branch.
+- Existing rehearsal branches contain one idempotency claim and one consumed approval in `v8-recovery-check`; the child `v8-replay-restore-rehearsal` branch contains the same matching records plus additional test records. This proves branch-copy persistence for those test records, not an independent snapshot restore or off-site backup of the data branch.
+- Render reports no Render-managed Postgres instance; the v8 service uses an external Neon connection. The Render service's active `DATABASE_URL` branch cannot be confirmed from service metadata because secret values are not exposed, and were not read.
+- A verified backup/export destination and a real restore rehearsal for the populated runtime branch remain release gates. No SQL mutation, snapshot creation or destructive restore was performed in this audit.
 
-### Tools and specialist execution
+### Render workspace inspection — 2026-11-06
+
+The owner confirmed use of the Render workspace `My Workspace` (workspace selection is passed explicitly to each request). Read-only inspection found:
+
+- The existing service is `unexpected-v8-command-center` (`srv-dbk8217b9u1s73ftauig`), Free plan, Frankfurt, one configured instance, health path `/health`, auto-deploy disabled.
+- The service is currently configured from repository `soueilouay-creator/uneXpected-`, branch `feat/unified-v8-foundation`, not from this repository `soueilouay-creator/uneXxxx` and not from PR #4.
+- Its latest recorded live deployment is `dep-dbke4je7bikc73feu3rg`, commit `d1b54ae0e520ff0e701e2584f46d523c2348f6f0`, finished 2026-11-02 19:20:03 UTC. The deployment commit changed the source-inventory file only.
+- Render's service metadata says `not_suspended`, but Render returned no service metrics for 2026-11-06 and no service events after 2026-11-02 19:20 UTC in the inspected range. This is insufficient to assert the app is currently responding.
+- The existing PR #11 in `uneXpected-` remains a draft. PR #4 in `uneXxxx` is also a draft. No merge, deploy, environment update, service retirement or Render service mutation was performed.
+- Render lists no managed Postgres database. The app's intended Neon connection remains external; the service's private environment and bearer token were not read.
+
+**Release implication:** The v8.1 code and sales workflow in this PR have passed CI but are not deployed to the Render service. A single canonical source/repository cutover and a fresh deployment verification remain outstanding. Keep `autoDeploy=false` and retain the existing service until the new source is reviewed, deployed manually and rollback is proven.
+
+## Tools and specialist execution
 
 - The current MCP gateway is an in-process adapter boundary. It does not connect to remote MCP servers.
 - Only reviewed, installed and enabled adapter records can be executed; adapter provenance, role scope, bounded arguments/results and permissions are checked. Privileged operations fail closed.

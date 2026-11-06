@@ -94,6 +94,12 @@ Example authenticated request:
 }
 ```
 
+## First business workflow: industrial-maintenance sales
+
+The hash-pinned `industrial-maintenance-sales` Skill maps the existing `sales-intel`, `business-strategist`, `maintenance-engineer`, `marketing-seo`, `data-analyst`, `project-manager`, `code-reviewer` and `self-improvement-governor` roles into one governed sales workflow. It is trigger-matched context, not an extra agent, service, CRM or connector.
+
+The workflow treats the latest Sales Control Center workbook as the source of truth, keeps prospect fit hypotheses separate from confirmed needs, and uses separate stages for draft, approved, sent, delivered, human-replied, demo-booked, quoted, accepted and paid. The $79 Starter and $149 Pro offers remain test-price hypotheses and their scope/exclusions must be rechecked from the current workbook before quoting. No email, form, retry, public post, quote, payment or customer-data action is authorized merely by loading this Skill. See `skills/industrial-maintenance-sales/SKILL.md` and `docs/ARCHITECTURE_FREEZE.md`.
+
 ## Governed MCP adapter boundary
 
 The v8.1 branch adds an in-process MCP adapter contract and an authenticated metadata catalog at GET /v1/mcp/tools. Adapters must match a reviewed capability record by source URL, publisher, version, content digest, permission scopes and data-access scopes. A capability must be installed, explicitly enabled and revalidated before each call.

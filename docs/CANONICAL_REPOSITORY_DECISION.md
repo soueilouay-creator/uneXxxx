@@ -26,7 +26,7 @@ The Render service `unexpected-v8-command-center` (`srv-dbk8217b9u1s73ftauig`) i
 
 The repository `uneXxxx` contains the newer v8.1 command center, architecture freeze and industrial-maintenance-sales Skill. Its PR #4 branch passed GitHub Actions run `42264871134` (260 tests, one optional legacy-fixture skip, Docker and container smoke checks). This is CI evidence, not hosted deployment evidence.
 
-The checked-in `uneXxxx/render.yaml` is a declarative service definition. Its presence does not rebind the existing Render service to this repository. The current Render connector exposes service inspection and deployment operations but no supported operation to change the Git repository attached to an existing service. No source switch, deployment, environment update, database mutation or service creation was performed for this decision.
+The checked-in `uneXxxx/render.yaml` is a declarative service definition; it does not rebind an existing Render service by itself. The connected Render MCP tools expose inspection and deploy operations but not the source-rebinding operation. Render's public Update Service API (`PATCH /v1/services/{serviceId}`) and current CLI also support updating `repo` and `branch`. In this session, no local Render CLI is installed and no `RENDER_API_KEY` is configured, so that API mutation is not available through the current execution host. No source switch, deployment, environment update, database mutation or service creation was performed for this decision.
 
 ## Controlled cutover procedure
 

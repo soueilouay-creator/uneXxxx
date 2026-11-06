@@ -99,3 +99,14 @@ This section supersedes the earlier statements in the PR #4 audit that Render wo
 - No Render service settings, environment variables, deployment, SQL rows, snapshots or branches were changed.
 
 Remaining hard blockers: align the canonical uneXxxx source with the existing Render service without creating a duplicate service; run a fresh non-mock provider test after the latest deploy; confirm the service's actual Neon branch; prove backup/restore of that populated branch; and complete a hosted seven-stage lifecycle with an authorized non-destructive tool. The sales Skill in PR #4 has an empty allowed_tools list until such runtime adapters exist; it remains draft-only for outbound communications.
+
+
+## 2026-11-06 canonical repository merge and deployment handoff
+
+- Owner approved `uneXxxx` as the sole canonical v8 repository. PR #4 was marked ready and squash-merged to `main` as `58c604cf55c437248284ed6d499f32715ff65f70`.
+- GitHub Actions run #47 (`42303544578`) passed on the PR integration ref: 260 tests passed, one optional legacy fixture skipped; PostgreSQL migrations, source inventory/hash checks, Docker build, actual-container health/auth/38-role/task smoke and CLI smoke passed. This is not a fresh CI run on the post-merge main SHA.
+- The merged branch includes the architecture freeze and hash-pinned `industrial-maintenance-sales` Skill mapped to eight existing roles. Its `allowed_tools` remains empty; no real email, calendar, Metricool or remote MCP adapter is thereby activated.
+- Read-after-write verified the canonical decision and sales Skill in `main`. The old `uneXpected-` and `uneXpected-ai-studio` repositories/services remain untouched.
+- Render service `unexpected-v8-command-center` (`srv-dbk8217b9u1s73ftauig`) remains configured to `soueilouay-creator/uneXpected-`, branch `feat/unified-v8-foundation`, with auto-deploy disabled. No source-repository switch, deployment, environment change, database mutation or service creation has occurred.
+- The connected Render app exposes read-only service inspection and deploy/config operations, but not the existing-service Git source update. The current host has no Render CLI and no Render API key in its configured environment. The official Update Service API supports repo/branch changes, but no authorized invocation path is available here; no secret was requested or exposed.
+- Production cutover remains gated by source rebinding on the existing service, confirmation of the active Neon branch, populated-branch backup/export and isolated restore rehearsal, fresh non-mock provider test, and end-to-end hosted health/auth/storage/lifecycle verification. Keep customer communications, publishing, privileged tools, payments and old-service retirement disabled.

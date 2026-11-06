@@ -21,6 +21,12 @@ flowchart TD
 
 The command center and runtime are one application. Roles are specifications executed as bounded sessions, not separate autonomous services. SQLite is the local backend; PostgreSQL is the hosted shared-state adapter. Provider keys remain server-side. Skills are hash-pinned context packages; their tool declarations do not grant capabilities. The MCP gateway is an in-process adapter boundary and does not open remote MCP connections. Child runs are sequential, bounded and linked to their parent task. Task event cursors retrieve persisted history without replaying work.
 
+## Architecture freeze and business workflow
+
+The v8 single-application topology and explicit phone/PWA exclusion are recorded in `docs/ARCHITECTURE_FREEZE.md`. The old phone-oriented repository is retained separately as legacy/reference material; it is not part of the v8 application and is not deleted by this change.
+
+The first business workflow is `industrial-maintenance-sales`, a hash-pinned, role-scoped Skill using existing canonical roles. Its `allowed_tools` list is empty until a specific runtime adapter is reviewed, registered, enabled and tested. The sales workflow therefore produces grounded research, pipeline analysis and approval-gated drafts only where the runtime lacks an authorized external connector.
+
 ## v8.1 implementation boundaries
 
 - MCP adapters must match a reviewed capability record by source, publisher, version, digest, permission scopes and data-access scopes. Calls require an enabled capability, role scope, permission authorization and bounded JSON inputs/results. In-process timeouts signal cooperative cancellation and are never retried; Python cannot forcibly stop an already-running adapter. Privileged MCP tools remain blocked until durable approval/replay is verified.

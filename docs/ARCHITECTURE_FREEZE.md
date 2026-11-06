@@ -1,8 +1,8 @@
 # uneXpected v8 Architecture Freeze
 
-**Decision status:** Proposed release freeze in PR #4; not merged or deployed.  
+**Decision status:** Accepted and merged to canonical `main` on 2026-11-06; production deployment pending.  
 **Baseline repository:** `soueilouay-creator/uneXxxx`  
-**Baseline branch/commit:** `main` / `67d2587af7eee08e14c8c80acfeacff897170f0b`  
+**Canonical `main` commit:** `58c604cf55c437248284ed6d499f32715ff65f70`  
 **Architecture line:** v8.1 preview; the package version is not being promoted by this document.  
 **Decision date:** 2026-11-06
 
@@ -42,9 +42,10 @@ The v8 repository already excludes phone/PWA files and includes regression check
 ### Repository and CI
 
 - The `uneXxxx` repository is the v8 command-center repository; do not substitute the older `uneXpected-ai-studio` or v7 `uneXpected-` repository.
-- The latest previously completed CI run on the baseline `main` commit ran 258 tests with one optional v6-fixture skip and completed successfully on 2026-11-03.
-- CI tests exercise a deterministic test provider and an ephemeral PostgreSQL service. They are regression evidence, not proof of production provider credentials, production deployment or external actions.
-- PR #4 adds architecture/sales-skill contract tests and is still a draft until those checks pass.
+- The pre-PR baseline `main` CI run passed 258 tests with one optional v6-fixture skip on 2026-11-03.
+- PR #4 was merged into canonical `main` on 2026-11-06 as `58c604cf55c437248284ed6d499f32715ff65f70`.
+- GitHub Actions run #47 (`42303544578`) passed on the PR integration ref immediately before the squash merge: 260 tests passed, one optional v6-fixture skipped; PostgreSQL migrations, SHA-256 integrity, Docker build, actual-container health/auth/38-role/task smoke, and CLI smoke all passed.
+- CI uses deterministic test providers and ephemeral PostgreSQL. This is regression evidence, not proof of production provider credentials, deployment or external actions.
 
 ### Provider authentication
 
@@ -67,10 +68,10 @@ The owner confirmed use of the Render workspace `My Workspace` (workspace select
 - The service is currently configured from repository `soueilouay-creator/uneXpected-`, branch `feat/unified-v8-foundation`, not from this repository `soueilouay-creator/uneXxxx` and not from PR #4.
 - Its latest recorded live deployment is `dep-dbke4je7bikc73feu3rg`, commit `d1b54ae0e520ff0e701e2584f46d523c2348f6f0`, finished 2026-11-02 19:20:03 UTC. The deployment commit changed the source-inventory file only.
 - Render's service metadata says `not_suspended`, but Render returned no service metrics for 2026-11-06 and no service events after 2026-11-02 19:20 UTC in the inspected range. This is insufficient to assert the app is currently responding.
-- The existing PR #11 in `uneXpected-` remains a draft. PR #4 in `uneXxxx` is also a draft. No merge, deploy, environment update, service retirement or Render service mutation was performed.
+- The existing PR #11 in `uneXpected-` remains a draft. PR #4 in canonical `uneXxxx` was merged on 2026-11-06. The Render service source has not changed, and no deployment, environment update, service retirement or Render service mutation was performed.
 - Render lists no managed Postgres database. The app's intended Neon connection remains external; the service's private environment and bearer token were not read.
 
-**Release implication:** The v8.1 code and sales workflow in this PR have passed CI but are not deployed to the Render service. A single canonical source/repository cutover and a fresh deployment verification remain outstanding. Keep `autoDeploy=false` and retain the existing service until the new source is reviewed, deployed manually and rollback is proven.
+**Release implication:** The v8.1 code and sales workflow are merged into canonical `uneXxxx/main` and passed PR CI, but are not deployed to Render. The existing service remains bound to `soueilouay-creator/uneXpected-`. Source rebinding, active database/provider verification, backup/restore proof and a controlled manual deployment remain outstanding. Keep `autoDeploy=false` and retain the existing service and rollback target.
 
 ## Tools and specialist execution
 
@@ -106,6 +107,6 @@ The acceptance milestone is a genuine human reply, a verified contact route and 
 - This is a scope freeze, not a claim that all runtime gates have passed.
 - Implement changes on a feature branch and open a reviewable PR. Require passing GitHub Actions plus review of the actual diff before merging.
 - Keep `main` and the older repositories untouched during this work.
-- Keep Render `autoDeploy: false`; do not trigger a production deploy from this PR.
-- Do not modify host secrets or production database contents in code-review work.
+- Keep Render `autoDeploy: false`; the repository merge did not trigger a production deployment.
+- Do not modify host secrets or production database contents as part of the source-repository cutover.
 - Protected changes to provider/model, credentials, permissions, external connectors, consequential actions or deployment require explicit owner approval and a tested rollback path.

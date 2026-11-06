@@ -8,7 +8,7 @@
 
 ## Scope statements
 
-Phone/PWA is out of scope for v8. Remote MCP is not connected in the current runtime. Historical live OpenRouter use is evidenced on 2026-11-02, but a fresh provider check on 2026-11-06 has not been completed.
+Phone/PWA is out of scope for v8. Remote MCP is not connected in the current runtime. Live provider verification is historically evidenced for OpenRouter on 2026-11-02, but a fresh provider check on 2026-11-06 has not been completed.
 
 ## Decision
 

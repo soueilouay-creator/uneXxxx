@@ -78,7 +78,7 @@
       "id": "industrial-maintenance-sales",
       "version": "1.0.0",
       "path": "skills/industrial-maintenance-sales/SKILL.md",
-      "sha256": "ece5a8c3cc9c3de4c316236f665eac6ba714ea053a56de63cdcf0087d9ba892c",
+      "sha256": "383f21e1ae1c9ac0171473222ee4cafee44a0d54a835e08c26dbb66a05217452",
       "agent_ids": [
         "sales-intel",
         "business-strategist",

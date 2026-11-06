@@ -415,5 +415,45 @@ class SkillAPITests(unittest.TestCase):
 
 
 
+
+class IndustrialMaintenanceSalesSkillTests(unittest.TestCase):
+    def test_sales_intel_auto_loads_sales_skill_and_peer_roles_are_scoped(self):
+        root = Path(__file__).resolve().parents[1]
+        registry = SkillRegistry.load(package_root=root)
+        sales = registry.resolve_all(
+            "sales-intel",
+            "industrial maintenance sales control center preventive maintenance tracker and spare-parts tracker",
+        )
+        self.assertIn("industrial-maintenance-sales", [item.id for item in sales])
+
+        allowed = {
+            "sales-intel", "business-strategist", "maintenance-engineer",
+            "marketing-seo", "data-analyst", "project-manager",
+            "code-reviewer", "self-improvement-governor",
+        }
+        for agent_id in allowed:
+            resolved = registry.resolve_all(
+                agent_id,
+                "industrial maintenance sales control center preventive maintenance tracker",
+            )
+            self.assertIn("industrial-maintenance-sales", [item.id for item in resolved])
+
+        unrelated = registry.resolve_all("sales-intel", "write a fantasy short story")
+        self.assertNotIn("industrial-maintenance-sales", [item.id for item in unrelated])
+
+    def test_sales_skill_context_contains_explicit_gates_and_does_not_claim_connectors(self):
+        root = Path(__file__).resolve().parents[1]
+        registry = SkillRegistry.load(package_root=root)
+        skill = next(item for item in registry.resolve_all(
+            "sales-intel", "industrial maintenance sales control center"
+        ) if item.id == "industrial-maintenance-sales")
+        context = registry.read_context(skill).lower()
+        for token in (
+            "human reply", "booked demo", "no automatic send",
+            "no guessed recipient", "fictional data", "test hypothesis",
+            "no remote mcp client", "approval",
+        ):
+            self.assertIn(token, context)
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

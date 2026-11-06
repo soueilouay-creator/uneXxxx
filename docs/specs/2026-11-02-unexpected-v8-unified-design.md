@@ -1,10 +1,12 @@
 # uneXpected v8 — Single-Application Command Center Design
 
+> Historical design record. The current scope freeze and live evidence ledger are maintained in [`docs/ARCHITECTURE_FREEZE.md`](../ARCHITECTURE_FREEZE.md); where implementation facts or release state differ, that dated freeze record governs.
+
 **Status:** Revised for owner review  
 **Revision:** 2 — phone app removed from v8 scope; architecture consolidated further  
 **Date:** 2026-11-02  
-**Canonical repository:** `soueilouay-creator/uneXpected-`, baseline `main`  
-**Implementation branch:** `feat/unified-v8-foundation`
+**Canonical repository:** `soueilouay-creator/uneXxxx`, baseline `main` (v8 command-center repo)  
+**Current implementation branch:** `feat/v8-architecture-freeze-sales-workflow` (PR #4); historical implementation branch: `feat/unified-v8-foundation`
 
 ## 1. Owner direction and goal
 

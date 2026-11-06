@@ -41,6 +41,12 @@ Allowed permission scopes: read_context, write_local_artifact, collaborate. Exte
 - account briefs
 - outreach hypotheses
 
+## Industrial-maintenance sales workflow
+
+When the request is about the Preventive Maintenance Tracker, spare-parts tracker, sales pipeline or Sales Control Center, load the hash-pinned `industrial-maintenance-sales` Skill from `skill_manifest.json`. Coordinate only the relevant existing roles; never claim separate always-on agents.
+
+Use the latest Sales Control Center workbook as the source of truth. Distinguish contact evidence, human replies, booked demos, quotes, accepted delivery and payment. The $79 Starter and $149 Pro are test-price hypotheses with defined exclusions, not approved custom quotes. Never retry a bounced/uncertain address or send a follow-up, form, quote, post or message without the exact action-specific approval and a verified connector. The v8 MCP gateway is currently in-process only; Skill tool declarations do not authorize external tools.
+
 ## Acceptance tests
 - [ ] Produces lead qualification rubric with evidence or clearly marked assumptions.
 - [ ] States unknowns and tool/runtime limitations; no unsupported completion claims.

@@ -449,9 +449,9 @@ class IndustrialMaintenanceSalesSkillTests(unittest.TestCase):
         ) if item.id == "industrial-maintenance-sales")
         context = registry.read_context(skill).lower()
         for token in (
-            "human reply", "booked demo", "no automatic send",
-            "no guessed recipient", "fictional data", "test hypothesis",
-            "no remote mcp client", "approval",
+            "human reply", "demo is booked only", "no automatic email sends",
+            "change recipients by guess", "fictional data", "test hypotheses",
+            "not a remote mcp client", "approval",
         ):
             self.assertIn(token, context)
 

@@ -6,6 +6,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
 from . import __version__
 from .permissions import PRIVILEGED
+from .models import CancellationToken, TaskRequest
 MAX_LIMIT=50
 MAX_DEADLINE=120.0
 def _obj(value:Any)->dict[str,Any]:
@@ -31,10 +32,30 @@ def _live_route(active,route:str|None)->str:
     if provider is None or name=="deterministic-mock" or not getattr(provider,"configured",True) or not getattr(provider,"verified",False):
         raise ToolError("MCP execution requires a configured, verified live provider route; mock and unverified routes are blocked.")
     return selected
+def _submit_task(active, request:TaskRequest, runner)->dict[str,Any]:
+    active.enqueue(request)
+    def guarded_runner():
+        try:
+            runner()
+        except Exception as exc:
+            failure={"status":"failed","error_type":type(exc).__name__}
+            active.store.mark_task(request.task_id,"failed",failure)
+            active.store.log_event("task_failed",request.task_id,request.agent_id,
+                                   {"source":"remote-mcp","error_type":type(exc).__name__})
+    try:
+        active.remote_mcp_pool.submit(guarded_runner)
+    except RuntimeError:
+        failure={"status":"failed","error":"runtime_shutting_down"}
+        active.store.mark_task(request.task_id,"failed",failure)
+        active.store.log_event("task_failed",request.task_id,request.agent_id,
+                               {"source":"remote-mcp","error_type":"executor_unavailable"})
+        raise ToolError("The task was persisted but could not be scheduled because the runtime is shutting down.") from None
+    return {"task_id":request.task_id,"status":"accepted","poll_tool":"get_task","events_tool":"get_task_events"}
+
 def build_mcp_server(active):
     server=MCPServer(name="uneXpected v8",title="uneXpected Command Center",
       description="Governed access to the hosted uneXpected v8 runtime.",
-      instructions="Use live runtime and persisted records. Execution tools create internal tasks only. External contact, publishing, booking, quotes, payments and external writes are not exposed.",
+      instructions="Use live runtime and persisted records. Long-running execution tools return persisted task IDs immediately; poll with get_task and get_task_events. Execution is internal only. External contact, publishing, booking, quotes, payments and external writes are not exposed.",
       version=__version__,subscriptions=False)
     @server.tool(description="Return safe runtime health, role count, storage and provider metadata. Never returns credentials.",structured_output=True)
     def runtime_status()->dict[str,Any]:
@@ -72,7 +93,7 @@ def build_mcp_server(active):
         for row in rows[:bounded]:
             item=dict(row); item["payload"]=_obj(item.pop("payload_json",None)); items.append(item)
         return {"task_id":task_id,"count":len(items),"items":items,"next_cursor":items[-1]["event_id"] if items else after_event_id,"has_more":len(rows)>bounded}
-    @server.tool(description="Run a bounded internal agent task. Requires verified live provider; no external write tools.",structured_output=True)
+    @server.tool(description="Submit a bounded internal agent task asynchronously. Returns a persisted task ID immediately; use get_task and get_task_events for progress and result. Requires a verified live provider; no external write tools.",structured_output=True)
     def run_task(agent_id:str,objective:str,inputs:dict[str,Any]|None=None,provider_route:str|None=None,deadline_seconds:float=60.0,max_steps:int=6)->dict[str,Any]:
         if not isinstance(agent_id,str) or not agent_id.strip(): raise ToolError("agent_id is required.")
         if not isinstance(objective,str) or not objective.strip() or len(objective)>16000: raise ToolError("Invalid objective.")
@@ -83,9 +104,10 @@ def build_mcp_server(active):
         except Exception: raise ToolError("Unknown agent_id.") from None
         if set(spec.allowed_permissions)&PRIVILEGED: raise ToolError("This role has privileged scopes and cannot be invoked through remote MCP.")
         selected=_live_route(active,provider_route)
-        result=active.invoke(agent_id,objective,inputs=inputs or {},deadline_seconds=float(deadline_seconds),max_steps=max_steps,provider_route=selected)
-        return {"result":result.to_dict()}
-    @server.tool(description="Run an internal draft-only commerce sales workflow for research, lead qualification, and offer preparation. Never contact customers or perform external actions.",structured_output=True)
+        request=TaskRequest.create(agent_id,objective,inputs=inputs or {},deadline_seconds=float(deadline_seconds),
+                                   max_steps=max_steps,provider_route=selected)
+        return _submit_task(active,request,lambda:active._execute_with_deadline(request,CancellationToken()))
+    @server.tool(description="Submit an internal draft-only commerce sales workflow asynchronously and return a persisted task ID immediately. Use get_task and get_task_events for progress and result. Never contact customers or perform external actions.",structured_output=True)
     def run_sales_workflow(objective:str,inputs:dict[str,Any]|None=None,provider_route:str|None=None,deadline_seconds:float=90.0,max_corrections:int=0,max_improvements:int=1)->dict[str,Any]:
         if not isinstance(objective,str) or not objective.strip() or len(objective)>12000: raise ToolError("Invalid objective.")
         if inputs is not None and not isinstance(inputs,dict): raise ToolError("inputs must be a JSON object.")
@@ -97,8 +119,22 @@ def build_mcp_server(active):
         safe_inputs["remote_mcp_execution_policy"]={"mode":"internal-draft-only","external_actions":"disabled",
           "never":["email/call/DM/form submission","publishing","meeting booking","quotes/payments","external-system writes"],
           "facts":"Use supplied facts only and label unknowns as discovery questions."}
-        result=active.run_lifecycle("sales-intel",objective,safe_inputs,max_corrections=max_corrections,max_improvements=max_improvements,deadline_seconds=float(deadline_seconds),provider_route=selected)
-        return {"result":result.to_dict()}
+        request=TaskRequest.create("sales-intel",objective,inputs=safe_inputs,deadline_seconds=float(deadline_seconds),
+                                   max_steps=6,provider_route=selected)
+        def execute_sales_workflow():
+            if not active.store.mark_task(request.task_id,"running"):
+                raise RuntimeError("sales workflow task could not be claimed")
+            active.store.log_event("task_started",request.task_id,"sales-intel",
+                                   {"source":"remote-mcp","workflow":"draft-only-commerce"})
+            result=active.run_lifecycle("sales-intel",objective,safe_inputs,max_corrections=max_corrections,
+                                        max_improvements=max_improvements,deadline_seconds=float(deadline_seconds),
+                                        provider_route=selected).to_dict()
+            success=result.get("status")=="delivered" and result.get("delivered") is True
+            final_status="completed" if success else "failed"
+            active.store.mark_task(request.task_id,final_status,result)
+            active.store.log_event("task_"+final_status,request.task_id,"sales-intel",
+                                   {"workflow_status":result.get("status"),"delivered":bool(result.get("delivered"))})
+        return _submit_task(active,request,execute_sales_workflow)
     app=server.streamable_http_app(streamable_http_path="/mcp",json_response=True,stateless_http=True,max_request_body_size=64*1024,
       transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=True,
         allowed_hosts=["127.0.0.1:*","localhost:*","unexpected-v8-command-center.onrender.com","unexpected-v8-command-center.onrender.com:*"],allowed_origins=[]),

@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
 """Networkless one-shot renderer. No uneXpected token, DB URL or provider is present."""
-import argparse,hashlib,json,os,shutil,subprocess,sys,tempfile,time
+import argparse,hashlib,json,os,re,shutil,subprocess,sys,tempfile,time
 from pathlib import Path
 ENGINE="5c05490cc55dfb54f8f4c333f0f0e79cb6500564"
 FFMPEG_SOURCE="3a0867c2bfda4a4d4309ca1a8cbdc6175e67f587"
 PROFILES={"youtube_shorts":(1080,1920),"tiktok":(1080,1920)}
+def ffmpeg_major(version_output):
+ for line in version_output.splitlines():
+  match=re.match(r"^ffmpeg version n?(\\d+)\\.",line.strip())
+  if match:return int(match.group(1))
+ return 0
 def write_json(p,d):
  p.parent.mkdir(parents=True,exist_ok=True);t=p.with_name(p.name+".tmp");t.write_text(json.dumps(d,sort_keys=True,indent=2),encoding="utf-8");os.replace(t,p)
 def digest(p):
@@ -40,7 +45,7 @@ def run():
   version_probe=subprocess.run(["ffmpeg","-version"],capture_output=True,text=True,check=True,timeout=5)
   vv=version_probe.stdout+"\n"+version_probe.stderr
   ffline=next((x for x in vv.splitlines() if x.startswith("ffmpeg version")),"")
-  if not any("version "+str(n)+"." in ffline for n in range(7,20)):raise RuntimeError("FFmpeg 7+ is required.")
+  if ffmpeg_major(vv)<7:raise RuntimeError("FFmpeg 7+ is required.")
   def progress(stage):
    d={"status":"running","stage":stage,"engine_commit":ENGINE,"updated_at":time.time()};write_json(out/"progress.json",d);print(json.dumps(d),flush=True)
   with tempfile.TemporaryDirectory(prefix="creator-render-") as tmp:

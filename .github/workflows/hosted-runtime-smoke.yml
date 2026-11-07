@@ -146,6 +146,7 @@ jobs:
           mcp_request() {
             local method="$1"
             local params="$2"
+            shift 2
             local body
             body="$(jq -cn --arg method "$method" --argjson params "$params" '{
               jsonrpc: "2.0", id: 1, method: $method,

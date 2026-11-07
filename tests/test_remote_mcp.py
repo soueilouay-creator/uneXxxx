@@ -128,6 +128,7 @@ class RemoteMCPHTTPTests(unittest.TestCase):
             self.coordinator.store.mark_task(
                 request.task_id, "completed", {"status": "completed", "output": "synthetic result"}
             )
+            return {"status": "completed", "output": "synthetic result"}
 
         self.coordinator._execute_with_deadline = delayed_execution
         request = {
@@ -139,6 +140,7 @@ class RemoteMCPHTTPTests(unittest.TestCase):
                 "provider_route": "synthetic-live",
                 "deadline_seconds": 20,
                 "max_steps": 1,
+                "idempotency_key": "mcp-agent-task-replay-test",
             },
         }
 
@@ -175,6 +177,14 @@ class RemoteMCPHTTPTests(unittest.TestCase):
                 task_id = result.get("task_id")
                 self.assertIsInstance(task_id, str)
                 self.assertTrue(task_id)
+
+                replay_status, replay_body = self.request_mcp(
+                    "tools/call", request, token=self.token, tool_name="run_task"
+                )
+                self.assertEqual(replay_status, 200, replay_body)
+                replay = replay_body["result"].get("structuredContent")
+                self.assertEqual(replay["task_id"], task_id)
+                self.assertEqual(replay["status"], "in_progress")
             finally:
                 release.set()
                 client.join(timeout=3)
@@ -183,6 +193,14 @@ class RemoteMCPHTTPTests(unittest.TestCase):
         self.assertIsNotNone(row)
         self.assertEqual(row["status"], "completed", row)
         self.assertEqual(json.loads(row["result_json"])["output"], "synthetic result")
+        replay_status, replay_body = self.request_mcp(
+            "tools/call", request, token=self.token, tool_name="run_task"
+        )
+        self.assertEqual(replay_status, 200, replay_body)
+        replay = replay_body["result"].get("structuredContent")
+        self.assertEqual(replay["task_id"], task_id)
+        self.assertEqual(replay["status"], "completed")
+        self.assertTrue(replay["replayed"])
 
     def test_remote_mcp_sales_tool_refuses_unverified_or_mock_provider(self):
         status, body = self.request_mcp(

@@ -233,7 +233,7 @@ jobs:
 
             mapfile -t group_ids < <(printf '%s' "${groups}" | jq -r \
               --arg service "${SERVICE_ID}" \
-              '.[] | select(any(.serviceLinks[]?; .id == $service)) | [.createdAt, .id] | @tsv' \
+              .[] | (.envGroup // .) | select(any(.serviceLinks[]?; .id == $service)) | [.createdAt, .id] | @tsv \
               | sort -r | cut -f2)
 
             for group_id in "${group_ids[@]}"; do

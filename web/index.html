@@ -14,6 +14,7 @@
 <a class="nav active" href="#overview" data-view="overview">◈ Overview</a>
 <a class="nav" href="#agents" data-view="agents">◎ Agent registry <b id="nav-count">38</b></a>
 <a class="nav" href="#tasks" data-view="tasks">▤ Tasks & workflows</a>
+<a class="nav" href="#creator" data-view="creator">▶ Creator Studio</a>
 <a class="nav" href="#workflows" data-view="workflows">◇ Workflow Studio <b id="workflow-nav-count">120</b></a>
 <a class="nav" href="#skills" data-view="skills">▧ Skills & tools <b id="skill-nav-count">3</b></a>
 <a class="nav" href="#providers" data-view="providers">⌘ AI providers</a>
@@ -85,7 +86,76 @@
 <div class="panel source-note" id="skill-policy-note"><b>Skill activation policy</b><p>Automatic skills are selected by the runtime using the request objective and the skill’s declared role scope. User-invoked skills appear only when their manifest explicitly permits that mode. Skill scripts and assets are not executed by the skill loader.</p></div>
 <div class="heading"><div><p class="eyebrow">MCP & CONNECTOR BOUNDARY</p><h3>Registered tools</h3><p>Only reviewed, installed and provenance-verified adapters are callable.</p></div></div><div id="mcp-tool-grid" class="tool-grid"><div class="empty">Loading registered tool adapters…</div></div>
 <div class="heading"><div><p class="eyebrow">CAPABILITY REGISTRY</p><h3>Capability status</h3></div></div><article class="panel"><div id="skills-capability-list" class="list">Loading capability status…</div></article>
-</section><footer>uneXpected v8 · One application · One coordinator · One source of truth</footer>
+</section><section class="view" id="view-creator">
+<div class="heading"><div><p class="eyebrow">YOUTUBE + TIKTOK PRODUCTION</p><h3>Creator Studio</h3><p>Create a project, write the script, plan scenes, request an isolated render, and inspect verified outputs.</p></div><span class="state ok">Opuscar pinned</span></div>
+<div class="metrics creator-metrics">
+<article><label>PROJECTS</label><strong id="creator-project-count">0</strong><small>Persisted in the uneXpected state store</small></article>
+<article><label>RENDER ENGINE</label><strong>Opuscar</strong><small>Commit 5c05490c · MIT</small></article>
+<article><label>RENDER STATUS</label><strong id="creator-render-state">Idle</strong><small id="creator-render-detail">No active render job selected</small></article>
+<article><label>DESTINATIONS</label><strong>YouTube · TikTok</strong><small>Metadata handoff only; publishing disabled</small></article>
+</div>
+<div class="creator-layout">
+<div class="creator-column">
+<article class="panel">
+<div class="heading"><div><p class="eyebrow">PROJECT WORKSPACE</p><h3>New project</h3></div></div>
+<form id="creator-project-form" class="creator-form">
+<label for="creator-title">Project title</label><input id="creator-title" maxlength="180" required placeholder="A story worth watching">
+<label for="creator-topic">Topic / brief</label><textarea id="creator-topic" rows="3" maxlength="600" required placeholder="What is this video about?"></textarea>
+<label for="creator-language">Language</label><input id="creator-language" maxlength="48" value="English" required>
+<p class="muted">The project is prepared for both YouTube Shorts and TikTok (vertical 9:16).</p>
+<button class="button primary" id="creator-create" type="submit">Create project</button>
+<div class="creator-result" id="creator-create-result" role="status"></div>
+</form>
+</article>
+<article class="panel">
+<div class="heading"><div><p class="eyebrow">SAVED WORK</p><h3>Projects</h3></div><button type="button" class="button secondary" id="creator-refresh">Refresh</button></div>
+<div id="creator-project-list" class="creator-project-list"><div class="empty">Connect to load your Creator Studio projects.</div></div>
+</article>
+</div>
+<div class="creator-column">
+<article class="panel">
+<div class="heading"><div><p class="eyebrow">SCRIPT + STORYBOARD</p><h3 id="creator-editor-title">Select a project</h3></div><span class="state" id="creator-project-status">No project</span></div>
+<form id="creator-version-form" class="creator-form">
+<label for="creator-hook">Opening hook</label><input id="creator-hook" maxlength="500" placeholder="The first seconds must earn attention">
+<label for="creator-script">Narration / script</label><textarea id="creator-script" rows="7" maxlength="16000" placeholder="Write the complete narration here…"></textarea>
+<label for="creator-scenes">Scenes (JSON array)</label><textarea id="creator-scenes" rows="6" spellcheck="false">[
+  {"id":"scene-01","duration_seconds":5,"visual":"Opening visual","narration":"Opening hook","on_screen_text":"Watch this"}
+]</textarea>
+<div class="button-row"><button class="button primary" id="creator-save-version" type="submit" disabled>Save script + scenes</button><span id="creator-version-state" class="muted">Select a project first.</span></div>
+</form>
+<div class="creator-subsection"><div class="heading"><div><p class="eyebrow">VERSION HISTORY</p><h4>Saved versions</h4></div></div><div id="creator-versions" class="list"><div class="empty">No project selected.</div></div></div>
+</article>
+<article class="panel">
+<div class="heading"><div><p class="eyebrow">GENERATION</p><h3>Render request</h3></div><span class="state" id="creator-engine-state">Not connected</span></div>
+<div class="creator-form">
+<label for="creator-style">Opuscar style</label>
+<select id="creator-style">
+<option value="whiteboard">Whiteboard</option><option value="papercut-red">Papercut red</option><option value="kino-montage">Kino montage</option><option value="blueprint">Blueprint</option><option value="risograph">Risograph</option><option value="woodcut">Woodcut</option><option value="silkscreen-poster">Silkscreen poster</option>
+</select>
+<p class="muted">The render job is recorded before dispatch. If no isolated worker is configured, the API returns a recoverable blocked job; it never renders model-authored code inside the API.</p>
+<div class="button-row"><button class="button primary" id="creator-render" type="button" disabled>Request render</button><button class="button secondary" id="creator-job-refresh" type="button" disabled>Refresh progress</button></div>
+<div id="creator-render-result" class="creator-result" role="status">No render requested.</div>
+</div>
+</article>
+<article class="panel">
+<div class="heading"><div><p class="eyebrow">OUTPUT REVIEW</p><h3>Preview, QA & exports</h3></div></div>
+<div class="creator-output-grid">
+<div><h4>Video preview</h4><div id="creator-preview" class="creator-preview"><span>No encoded MP4 asset is attached to this project yet.</span></div></div>
+<div><h4>Quality report</h4><div id="creator-qa" class="list"><div class="empty">QA will appear after a real MP4 is inspected.</div></div></div>
+</div>
+<div class="creator-subsection">
+<h4>Platform packages</h4>
+<div class="creator-export-grid">
+<div class="creator-export-card"><b>YouTube Shorts</b><p id="creator-youtube-state">Waiting for a verified master and passing QA.</p><button type="button" class="button secondary" disabled>Prepare YouTube package</button></div>
+<div class="creator-export-card"><b>TikTok</b><p id="creator-tiktok-state">Waiting for a verified master and passing QA.</p><button type="button" class="button secondary" disabled>Prepare TikTok package</button></div>
+</div>
+<p class="muted">Export controls stay locked until the artifact, QA result and platform package are connected to verified storage. No upload or public publishing is enabled here.</p>
+</div>
+</article>
+</div>
+</div>
+</section>
+<footer>uneXpected v8 · One application · One coordinator · One source of truth</footer>
 </main></div>
 <div class="auth-overlay" id="auth-overlay"><form id="auth-form"><h2>Connect to uneXpected</h2><p>Enter the command-center access token. It stays in this tab's memory and is not saved.</p><label for="auth-token">Access token</label><input id="auth-token" type="password" autocomplete="off" required><button class="button primary">Connect securely</button><small id="auth-error"></small></form></div>
 <div id="toast" role="status" aria-live="polite"></div>

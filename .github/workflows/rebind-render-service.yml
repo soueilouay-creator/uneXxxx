@@ -1,0 +1,91 @@
+name: Rebind existing Render service without deploying
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/rebind-render-service.yml"
+  workflow_dispatch:
+    inputs:
+      confirm_rebind:
+        description: "Type the exact confirmation to reapply the source binding"
+        required: true
+        type: choice
+        options:
+          - apply-render-source-rebind
+
+permissions:
+  contents: read
+
+concurrency:
+  group: render-source-rebind-srv-dbk8217b9u1s73ftauig
+  cancel-in-progress: false
+
+jobs:
+  rebind:
+    name: Rebind canonical source (no deployment)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Validate manual confirmation and API credential
+        shell: bash
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          CONFIRM_REBIND: ${{ inputs.confirm_rebind }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && "${CONFIRM_REBIND:-}" != "apply-render-source-rebind" ]]; then
+            echo "::error::Manual dispatch confirmation did not match. No Render request was made."
+            exit 1
+          fi
+          if [[ -z "${RENDER_API_KEY:-}" ]]; then
+            echo "::error::Repository secret RENDER_API_KEY is missing. Add it in GitHub Settings → Secrets and variables → Actions. No Render request was made."
+            exit 1
+          fi
+          echo "Render API credential is present; its value is not displayed."
+
+      - name: Rebind the existing service and verify the saved settings
+        shell: bash
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          SERVICE_ID: srv-dbk8217b9u1s73ftauig
+          TARGET_REPO: https://github.com/soueilouay-creator/uneXxxx
+          TARGET_BRANCH: main
+        run: |
+          set -euo pipefail
+
+          payload="$(jq -n \
+            --arg repo "${TARGET_REPO}" \
+            --arg branch "${TARGET_BRANCH}" \
+            '{repo: $repo, branch: $branch, autoDeployTrigger: "off"}')"
+
+          patched="$(curl --silent --show-error --fail-with-body \
+            --connect-timeout 10 --max-time 30 \
+            --request PATCH \
+            --url "https://api.render.com/v1/services/${SERVICE_ID}" \
+            --header "Authorization: Bearer ${RENDER_API_KEY}" \
+            --header "Accept: application/json" \
+            --header "Content-Type: application/json" \
+            --data "${payload}")"
+
+          printf '%s' "${patched}" | jq -e \
+            --arg id "${SERVICE_ID}" \
+            --arg repo "${TARGET_REPO}" \
+            --arg branch "${TARGET_BRANCH}" \
+            '.id == $id and .repo == $repo and .branch == $branch and .autoDeployTrigger == "off"' >/dev/null
+
+          verified="$(curl --silent --show-error --fail-with-body \
+            --connect-timeout 10 --max-time 30 \
+            --request GET \
+            --url "https://api.render.com/v1/services/${SERVICE_ID}" \
+            --header "Authorization: Bearer ${RENDER_API_KEY}" \
+            --header "Accept: application/json")"
+
+          printf '%s' "${verified}" | jq -e \
+            --arg id "${SERVICE_ID}" \
+            --arg repo "${TARGET_REPO}" \
+            --arg branch "${TARGET_BRANCH}" \
+            '.id == $id and .repo == $repo and .branch == $branch and .autoDeployTrigger == "off"' >/dev/null
+
+          echo "Verified existing service ${SERVICE_ID}: canonical repository and main branch are saved; automatic deployment remains off."
+          echo "No deployment was requested by this workflow."

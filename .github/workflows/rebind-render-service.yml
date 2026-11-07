@@ -214,7 +214,7 @@ jobs:
           set -euo pipefail
 
           service_vars="$(curl --silent --show-error --fail-with-body \
-            --connect-timeout 15 --max-time 120 \
+            --connect-timeout 10 --max-time 30 \
             --url "https://api.render.com/v1/services/${SERVICE_ID}/env-vars?limit=100" \
             --header "Authorization: Bearer ${RENDER_API_KEY}" \
             --header "Accept: application/json")"
@@ -254,7 +254,7 @@ jobs:
 
           response=""
           if ! response="$(curl --silent --show-error --fail-with-body \
-            --connect-timeout 10 --max-time 30 \
+            --connect-timeout 15 --max-time 120 \
             --request POST \
             --url "${SERVICE_URL}/v1/providers/test" \
             --header "Authorization: Bearer ${runtime_token}" \

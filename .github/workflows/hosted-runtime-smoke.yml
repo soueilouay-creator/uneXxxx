@@ -1,4 +1,4 @@
-name: uneXpected hosted runtime verification
+name: uneXpected hosted runtime and Shopify MCP verification
 
 on:
   workflow_dispatch:
@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   hosted-runtime-smoke:
-    name: Verify deployed v8 runtime and synthetic sales lifecycle
+    name: Verify deployed v8 runtime, Shopify sales workflow and persistence
     runs-on: ubuntu-latest
     timeout-minutes: 12
     env:
@@ -138,36 +138,111 @@ jobs:
             '.ok == true and .verified == true and .provider_route == "openrouter" and .provider != "deterministic-mock"' >/dev/null
           printf '%s' "${provider_response}" | jq -c '{provider_route, provider, model, latency_ms, verified}'
 
-      - name: Run synthetic industrial-maintenance sales lifecycle and verify persisted tasks
+      - name: Verify authenticated remote MCP, Shopify workflow and recovery after restart
         shell: bash
         run: |
           set -euo pipefail
-          payload="$(jq -n --arg run "${GITHUB_RUN_ID}" '{
-            agent_id: "sales-intel",
-            objective: "Run a synthetic industrial-maintenance sales workflow for a fictional workshop. Qualify the stated maintenance need, select Starter versus Pro only from the supplied synthetic facts, list remaining discovery questions, prepare a draft-only next-step checklist, and identify evidence required before a verified demo. Do not contact anyone, send or submit anything, book a meeting, issue a real quote, or invent prospect facts.",
+
+          mcp_request() {
+            local method="$1"
+            local params="$2"
+            local body
+            body="$(jq -cn --arg method "$method" --argjson params "$params" '{
+              jsonrpc: "2.0", id: 1, method: $method,
+              params: ($params + {_meta: {
+                "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                "io.modelcontextprotocol/clientCapabilities": {}
+              }})
+            }')"
+            curl --silent --show-error --fail-with-body \
+              --connect-timeout 15 --max-time 120 \
+              --request POST --url "${SERVICE_URL}/mcp" \
+              --header "Authorization: Bearer ${RUNTIME_TOKEN}" \
+              --header "Content-Type: application/json" \
+              --header "Accept: application/json, text/event-stream" \
+              --header "Mcp-Method: ${method}" \
+              --header "MCP-Protocol-Version: 2026-07-28" \
+              --data "${body}" "$@"
+          }
+
+          mcp_tool() {
+            local name="$1"
+            local arguments="$2"
+            local params
+            params="$(jq -cn --arg name "$name" --argjson arguments "$arguments" \
+              '{name: $name, arguments: $arguments}')"
+            mcp_request "tools/call" "${params}" \
+              --header "Mcp-Name: ${name}"
+          }
+
+          structured_result() {
+            jq -c '
+              if .result.structuredContent? != null then .result.structuredContent
+              elif .result.structured_content? != null then .result.structured_content
+              else ([.result.content[]? | select(.type == "text") |
+                (.text | (try fromjson catch .))][0] // .result)
+              end
+            '
+          }
+
+          anonymous_body="$(jq -cn '{
+            jsonrpc:"2.0", id:1, method:"tools/list",
+            params:{_meta:{
+              "io.modelcontextprotocol/protocolVersion":"2026-07-28",
+              "io.modelcontextprotocol/clientCapabilities":{}
+            }}
+          }')"
+          anonymous_code="$(curl --silent --show-error --output "${RUNNER_TEMP}/anonymous-mcp.json" \
+            --write-out '%{http_code}' --connect-timeout 10 --max-time 20 \
+            --request POST --url "${SERVICE_URL}/mcp" \
+            --header "Content-Type: application/json" \
+            --header "Accept: application/json, text/event-stream" \
+            --header "Mcp-Method: tools/list" \
+            --header "MCP-Protocol-Version: 2026-07-28" \
+            --data "${anonymous_body}")"
+          if [[ "${anonymous_code}" != "401" ]]; then
+            echo "::error::Expected anonymous /mcp to return 401; received ${anonymous_code}."
+            exit 1
+          fi
+
+          catalog="$(mcp_request "tools/list" '{}')"
+          printf '%s' "${catalog}" | jq -e '
+            ([.result.tools[].name] | sort) ==
+            ["get_task","get_task_events","list_agents","list_tasks","run_sales_workflow","run_task","runtime_status"]
+          ' >/dev/null
+          echo "Authenticated /mcp catalog returned 7 governed tools; anonymous access returned 401."
+
+          status="$(mcp_tool "runtime_status" '{}')"
+          status_data="$(printf '%s' "${status}" | structured_result)"
+          printf '%s' "${status_data}" | jq -e \
+            '.registered_agents == 38 and .health == "ready" and .storage_healthy == true' >/dev/null
+
+          agents="$(mcp_tool "list_agents" '{}')"
+          agents_data="$(printf '%s' "${agents}" | structured_result)"
+          printf '%s' "${agents_data}" | jq -e '.count == 38 and (.items | length == 38)' >/dev/null
+
+          tasks_before="$(mcp_tool "list_tasks" '{"limit":10}')"
+          printf '%s' "${tasks_before}" | structured_result | jq -e '.count >= 0' >/dev/null
+
+          sales_args="$(jq -cn --arg run "${GITHUB_RUN_ID}" '{
+            objective: "Run a Shopify commerce-readiness workflow for the connected test store. Assess store readiness from supplied verified shop facts; identify setup blockers, product-catalogue prerequisites, order/payment/fulfillment checks, and the next three internal actions. Do not invent products, customers, orders, revenue, traffic or payment status. Distinguish verified facts from unknowns. Internal test only.",
             inputs: {
-              verification_scope: "synthetic release smoke only; not a real prospect or customer",
-              fictional_prospect: {
-                name: "Example Packaging Workshop (fictional)",
-                machine_count: 12,
-                user_count: 2,
-                excel_version: "Microsoft Excel 365",
-                part_sku_count: 35,
-                stated_needs: [
-                  "preventive-maintenance scheduling",
-                  "spare-parts reorder visibility"
-                ],
-                current_process: "unknown",
-                decision_maker: "unknown",
-                contact_details: "not supplied"
+              verification_scope: "read-only Shopify context from connected Shopify Admin integration; internal draft-only test",
+              shopify_store: {
+                name: "My Store", domain: "ybzeyh-yq.myshopify.com",
+                country: "Tunisia", currency: "TND", plan: "trial"
+              },
+              observed_store_data: {
+                product_count: 0, order_count: 0,
+                customer_count: "not queried", revenue: "not queried"
               },
               constraints: [
-                "Use only the fictional facts provided here.",
-                "Mark unknowns as discovery questions, never as confirmed facts.",
-                "Do not access real inboxes, calendars, customer data or external systems.",
-                "Do not send email, submit forms, call, DM, publish, quote or book anything.",
-                "Treat $79 Starter and $149 Pro as test-price hypotheses, not validated market rates.",
-                "Return the next internal action and the exact evidence needed to advance the pipeline."
+                "Use only supplied facts.",
+                "Do not create, update, delete, import or publish Shopify products or collections.",
+                "Do not create discounts, change inventory, settings or upgrade the Shopify plan.",
+                "Do not access customer PII or contact customers.",
+                "Do not message, submit forms, publish, quote, book or charge payments.",
+                "Label unknown values as unknown and provide a checklist."
               ],
               smoke_run_id: $run
             },
@@ -177,52 +252,85 @@ jobs:
             max_improvements: 1
           }')"
 
-          lifecycle="$(curl --silent --show-error --fail-with-body \
-            --connect-timeout 15 --max-time 300 \
-            --request POST \
-            --url "${SERVICE_URL}/v1/lifecycle" \
-            --header "Authorization: Bearer ${RUNTIME_TOKEN}" \
-            --header "Content-Type: application/json" \
-            --header "Accept: application/json" \
-            --data "${payload}")"
+          sales_response="$(mcp_tool "run_sales_workflow" "${sales_args}")"
+          sales_data="$(printf '%s' "${sales_response}" | structured_result)"
+          printf '%s' "${sales_data}" | jq -e \
+            '.result.status == "delivered" and .result.delivered == true and (.result.workflow_id | type == "string" and length > 0)' >/dev/null
 
-          printf '%s' "${lifecycle}" | jq -e \
-            '.result.status == "delivered" and .result.delivered == true and (.result.workflow_id | type == "string" and length > 0) and (.result.verification_history | length >= 2)' >/dev/null
-
-          workflow_id="$(printf '%s' "${lifecycle}" | jq -r '.result.workflow_id')"
-          task_ids="$(printf '%s' "${lifecycle}" | jq -r \
-            '[.result.plan.task_id, .result.execution.task_id, (.result.verification_history[]?.task_id)] | map(select(type == "string" and length > 0)) | unique[]')"
+          task_ids="$(printf '%s' "${sales_data}" | jq -r \
+            '[.. | objects | .task_id? // empty | select(type == "string" and length > 0)] | unique[]')"
           if [[ -z "${task_ids}" ]]; then
-            echo "::error::Lifecycle delivered but returned no persisted stage task IDs."
+            echo "::error::Shopify workflow returned no persistent task IDs."
             exit 1
           fi
 
-          checked=0
           first_task=""
+          checked=0
           while IFS= read -r task_id; do
             [[ -n "${task_id}" ]] || continue
             [[ -n "${first_task}" ]] || first_task="${task_id}"
-            task="$(curl --silent --show-error --fail-with-body \
-              --connect-timeout 10 --max-time 20 \
-              --url "${SERVICE_URL}/v1/tasks/${task_id}" \
-              --header "Authorization: Bearer ${RUNTIME_TOKEN}" \
-              --header "Accept: application/json")"
-            printf '%s' "${task}" | jq -e --arg id "${task_id}" \
-              '.task.task_id == $id and .task.result.status == "completed"' >/dev/null
+            task_response="$(mcp_tool "get_task" "$(jq -cn --arg id "${task_id}" '{task_id:$id}')")"
+            task_data="$(printf '%s' "${task_response}" | structured_result)"
+            printf '%s' "${task_data}" | jq -e --arg id "${task_id}" '.task.task_id == $id' >/dev/null
+
+            events_response="$(mcp_tool "get_task_events" \
+              "$(jq -cn --arg id "${task_id}" '{task_id:$id,after_event_id:0,limit:50}')")"
+            events_data="$(printf '%s' "${events_response}" | structured_result)"
+            printf '%s' "${events_data}" | jq -e '.count > 0 and (.items | length > 0)' >/dev/null
             checked=$((checked + 1))
           done <<< "${task_ids}"
 
-          events="$(curl --silent --show-error --fail-with-body \
-            --connect-timeout 10 --max-time 20 \
-            --url "${SERVICE_URL}/v1/tasks/${first_task}/events?after=0" \
-            --header "Authorization: Bearer ${RUNTIME_TOKEN}" \
+          if [[ -z "${first_task}" || "${checked}" -lt 1 ]]; then
+            echo "::error::No task could be retrieved before restart."
+            exit 1
+          fi
+          echo "Shopify workflow delivered; ${checked} persisted task(s) and event histories were retrieved before restart."
+
+          restart_code="$(curl --silent --show-error --output "${RUNNER_TEMP}/render-restart.json" \
+            --write-out '%{http_code}' --connect-timeout 10 --max-time 30 \
+            --request POST --url "https://api.render.com/v1/services/${SERVICE_ID}/restart" \
+            --header "Authorization: Bearer ${RENDER_API_KEY}" \
             --header "Accept: application/json")"
-          event_count="$(printf '%s' "${events}" | jq -r '.count')"
-          if [[ "${event_count}" -lt 1 ]]; then
-            echo "::error::Lifecycle task exists but its persisted event history is empty."
+          if [[ ! "${restart_code}" =~ ^2[0-9][0-9]$ ]]; then
+            echo "::error::Render restart request failed (HTTP ${restart_code})."
+            cat "${RUNNER_TEMP}/render-restart.json"
             exit 1
           fi
 
-          printf '%s' "${lifecycle}" | jq -c --argjson task_count "${checked}" --argjson event_count "${event_count}" \
-            '{workflow_id: .result.workflow_id, status: .result.status, delivered: .result.delivered, corrections: .result.corrections, improvements: .result.improvements, verification_history: [.result.verification_history[] | {phase, passed}], persisted_stage_tasks: $task_count, representative_task_events: $event_count}'
-          echo "Synthetic lifecycle passed. No real prospect was contacted, no meeting booked and no quote or external message sent."
+          healthy="false"
+          for attempt in $(seq 1 60); do
+            sleep 5
+            if curl --silent --show-error --fail --connect-timeout 5 --max-time 10 \
+                --url "${SERVICE_URL}/health" --header "Accept: application/json" \
+                --output "${RUNNER_TEMP}/health-after-restart.json"; then
+              if jq -e '.ok == true and .storage == "ready"' \
+                  "${RUNNER_TEMP}/health-after-restart.json" >/dev/null; then
+                healthy="true"
+                break
+              fi
+            fi
+          done
+          if [[ "${healthy}" != "true" ]]; then
+            echo "::error::Runtime did not return healthy after the requested restart."
+            exit 1
+          fi
+
+          post_restart_checks=0
+          while IFS= read -r task_id; do
+            [[ -n "${task_id}" ]] || continue
+            task_response="$(mcp_tool "get_task" "$(jq -cn --arg id "${task_id}" '{task_id:$id}')")"
+            task_data="$(printf '%s' "${task_response}" | structured_result)"
+            printf '%s' "${task_data}" | jq -e --arg id "${task_id}" '.task.task_id == $id' >/dev/null
+
+            events_response="$(mcp_tool "get_task_events" \
+              "$(jq -cn --arg id "${task_id}" '{task_id:$id,after_event_id:0,limit:50}')")"
+            events_data="$(printf '%s' "${events_response}" | structured_result)"
+            printf '%s' "${events_data}" | jq -e '.count > 0 and (.items | length > 0)' >/dev/null
+            post_restart_checks=$((post_restart_checks + 1))
+          done <<< "${task_ids}"
+
+          if [[ "${post_restart_checks}" -ne "${checked}" ]]; then
+            echo "::error::Task recovery count changed after restart."
+            exit 1
+          fi
+          echo "SUCCESS: bearer authentication, live MCP, Shopify Sales Control Center workflow, persisted task retrieval, Render restart and post-restart recovery all passed."

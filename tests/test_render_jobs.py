@@ -22,6 +22,8 @@ class RenderJobContractTests(unittest.TestCase):
         self.project = self.input / "project"
         self.project.mkdir(parents=True)
         self.output.mkdir()
+        (self.project / "audio").mkdir()
+        (self.project / "audio" / "mix.wav").write_bytes(b"test soundtrack placeholder")
         (self.project / "index.html").write_text(
             "<!doctype html><script>window.DUR=1;window.READY=true;"
             "window.render=(t)=>{};</script>", encoding="utf-8"

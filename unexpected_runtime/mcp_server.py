@@ -85,7 +85,7 @@ def build_mcp_server(active):
         selected=_live_route(active,provider_route)
         result=active.invoke(agent_id,objective,inputs=inputs or {},deadline_seconds=float(deadline_seconds),max_steps=max_steps,provider_route=selected)
         return {"result":result.to_dict()}
-    @server.tool(description="Run an internal draft-only industrial-maintenance sales workflow. Never contact prospects or perform external actions.",structured_output=True)
+    @server.tool(description="Run an internal draft-only commerce sales workflow for research, lead qualification, and offer preparation. Never contact customers or perform external actions.",structured_output=True)
     def run_sales_workflow(objective:str,inputs:dict[str,Any]|None=None,provider_route:str|None=None,deadline_seconds:float=90.0,max_corrections:int=0,max_improvements:int=1)->dict[str,Any]:
         if not isinstance(objective,str) or not objective.strip() or len(objective)>12000: raise ToolError("Invalid objective.")
         if inputs is not None and not isinstance(inputs,dict): raise ToolError("inputs must be a JSON object.")

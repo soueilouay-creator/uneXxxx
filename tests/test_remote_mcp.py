@@ -91,6 +91,12 @@ class RemoteMCPHTTPTests(unittest.TestCase):
         forbidden = {"send_email", "send_dm", "submit_form", "publish_post", "book_meeting", "issue_quote"}
         self.assertFalse(names & forbidden)
 
+        sales_tool = next(tool for tool in body["result"]["tools"] if tool["name"] == "run_sales_workflow")
+        description = sales_tool.get("description", "").lower()
+        self.assertIn("draft-only", description)
+        self.assertIn("commerce", description)
+        self.assertNotIn("industrial-maintenance", description)
+
     def test_remote_mcp_runtime_status_tool_returns_safe_live_metadata(self):
         status, body = self.request_mcp(
             "tools/call",

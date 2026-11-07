@@ -130,7 +130,7 @@ def build_mcp_server(active):
         for row in rows[:bounded]:
             item=dict(row); item["payload"]=_obj(item.pop("payload_json",None)); items.append(item)
         return {"task_id":task_id,"count":len(items),"items":items,"next_cursor":items[-1]["event_id"] if items else after_event_id,"has_more":len(rows)>bounded}
-    @server.tool(description="Submit a bounded internal agent task asynchronously. Returns a persisted task ID immediately; use get_task and get_task_events for progress and result. Requires a verified live provider; no external write tools.",structured_output=True)
+    @server.tool(description="Submit a bounded internal agent task asynchronously. Returns a persisted task ID immediately; use get_task and get_task_events for progress and result. Reuse the same idempotency_key when retrying. Requires a verified live provider; no external write tools.",structured_output=True)
     def run_task(agent_id:str,objective:str,inputs:dict[str,Any]|None=None,provider_route:str|None=None,deadline_seconds:float=60.0,max_steps:int=6,idempotency_key:str|None=None)->dict[str,Any]:
         if not isinstance(agent_id,str) or not agent_id.strip(): raise ToolError("agent_id is required.")
         if not isinstance(objective,str) or not objective.strip() or len(objective)>16000: raise ToolError("Invalid objective.")
@@ -145,7 +145,7 @@ def build_mcp_server(active):
         request=TaskRequest.create(agent_id,objective,inputs=inputs or {},deadline_seconds=float(deadline_seconds),
                                    max_steps=max_steps,provider_route=selected,idempotency_key=idempotency_key)
         return _submit_task(active,request,lambda:active._execute_with_deadline(request,CancellationToken()))
-    @server.tool(description="Submit an internal draft-only commerce sales workflow asynchronously and return a persisted task ID immediately. Use get_task and get_task_events for progress and result. Never contact customers or perform external actions.",structured_output=True)
+    @server.tool(description="Submit an internal draft-only commerce sales workflow asynchronously and return a persisted task ID immediately. Use get_task and get_task_events for progress and result. Reuse the same idempotency_key when retrying. Never contact customers or perform external actions.",structured_output=True)
     def run_sales_workflow(objective:str,inputs:dict[str,Any]|None=None,provider_route:str|None=None,deadline_seconds:float=90.0,max_corrections:int=0,max_improvements:int=1,idempotency_key:str|None=None)->dict[str,Any]:
         if not isinstance(objective,str) or not objective.strip() or len(objective)>12000: raise ToolError("Invalid objective.")
         if inputs is not None and not isinstance(inputs,dict): raise ToolError("inputs must be a JSON object.")

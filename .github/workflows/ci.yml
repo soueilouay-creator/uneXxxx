@@ -39,6 +39,9 @@ jobs:
         run: python -m compileall -q unexpected_runtime
       - name: Syntax-check command-center JavaScript
         run: node --check web/assets/app.js
+      - name: Validate GitHub Actions workflow YAML
+        run: |
+          ruby -e 'require "yaml"; ARGV.each { |path| YAML.load_file(path); puts "Validated #{path}" }' .github/workflows/*.yml
       - name: Validate resource and quality scenario contracts
         run: |
           python -m json.tool unexpected_runtime/data/resource_catalog.json >/dev/null

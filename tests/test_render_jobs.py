@@ -101,6 +101,14 @@ class RenderJobContractTests(unittest.TestCase):
                 limits={"cpu_seconds": 601, "memory_mb": 512, "wall_time_seconds": 90},
             )
 
+    def test_ffmpeg_version_detection_combines_stdout_and_stderr(self):
+        # FFmpeg reports its version banner on stderr in some builds.
+        stdout = ""
+        stderr = "ffmpeg version 7.1.5 Copyright (c) FFmpeg developers"
+        combined = stdout + "\n" + stderr
+        self.assertIn("ffmpeg version 7.", combined)
+        self.assertNotIn("ffmpeg version 7.", stdout)
+
     def test_unconfigured_dispatcher_fails_closed_without_local_fallback(self):
         from unexpected_runtime.render_jobs import DockerRenderDispatcher
         dispatcher = DockerRenderDispatcher(enabled=False)

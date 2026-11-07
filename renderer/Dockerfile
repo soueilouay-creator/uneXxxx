@@ -11,7 +11,7 @@ RUN git init /tmp/ffmpeg-src \
  && cd /tmp/ffmpeg-src \
  && ./configure --prefix=/opt/ffmpeg --enable-gpl --enable-libx264 --disable-debug --disable-doc --disable-ffplay \
  && make -j2 && make install \
- && /opt/ffmpeg/bin/ffmpeg -version | grep -F 'ffmpeg version 7.' \
+ && /opt/ffmpeg/bin/ffmpeg -version 2>&1 | grep -F 'ffmpeg version 7.' \
  && rm -rf /tmp/ffmpeg-src
 ENV PATH="/opt/ffmpeg/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 RUN git init /opt/lemo-opuscar \

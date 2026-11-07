@@ -37,7 +37,8 @@ def run():
  try:
   p,source=validate(root);job=p["job_id"]
   if not (engine/"core/render/video.mjs").is_file():raise RuntimeError("Pinned Opuscar installation is incomplete.")
-  vv=subprocess.run(["ffmpeg","-version"],capture_output=True,text=True,check=True,timeout=5).stdout
+  version_probe=subprocess.run(["ffmpeg","-version"],capture_output=True,text=True,check=True,timeout=5)
+  vv=version_probe.stdout+"\n"+version_probe.stderr
   ffline=next((x for x in vv.splitlines() if x.startswith("ffmpeg version")),"")
   if not any("version "+str(n)+"." in ffline for n in range(7,20)):raise RuntimeError("FFmpeg 7+ is required.")
   def progress(stage):

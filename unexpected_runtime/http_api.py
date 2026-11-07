@@ -1,5 +1,5 @@
 from __future__ import annotations
-import hmac, json, os, threading, time, math
+import asyncio, hmac, json, os, threading, time, math
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import urlsplit, parse_qs
@@ -108,6 +108,77 @@ def create_server(*, coordinator=None, api_token=None, host="127.0.0.1", port=0)
             except (UnicodeDecodeError,json.JSONDecodeError): self.send_json(400,{"error":"Body must be valid UTF-8 JSON."}); return None
             if not isinstance(obj,dict): self.send_json(400,{"error":"Body must be a JSON object."}); return None
             return obj
+        def handle_mcp_post(self):
+            if not self.authorize():
+                return
+            if not self.headers.get("Content-Type", "").lower().startswith("application/json"):
+                return self.send_json(400, {"error": "MCP requests must use application/json."})
+            raw_length = self.headers.get("Content-Length")
+            if raw_length is None:
+                return self.send_json(411, {"error": "Content-Length is required."})
+            try:
+                length = int(raw_length)
+            except ValueError:
+                return self.send_json(400, {"error": "Invalid Content-Length."})
+            if length < 0:
+                return self.send_json(400, {"error": "Invalid Content-Length."})
+            if length > MAX_BODY_BYTES:
+                return self.send_json(413, {"error": "MCP request body too large."})
+            try:
+                body = self.rfile.read(length)
+            except OSError:
+                return
+            if len(body) != length:
+                return self.send_json(400, {"error": "Incomplete MCP request body."})
+            from .mcp_server import build_mcp_server
+            try:
+                server, app = build_mcp_server(active)
+                headers = [(k.lower().encode("latin-1"), v.encode("latin-1")) for k, v in self.headers.items()]
+                proto = self.headers.get("X-Forwarded-Proto", "http").split(",", 1)[0].strip()
+                scope = {
+                    "type": "http", "asgi": {"version": "3.0", "spec_version": "2.4"},
+                    "http_version": self.request_version.replace("HTTP/", ""), "method": "POST",
+                    "scheme": proto if proto in {"http", "https"} else "https",
+                    "path": "/mcp", "raw_path": b"/mcp",
+                    "query_string": urlsplit(self.path).query.encode("ascii", errors="ignore"),
+                    "root_path": "", "headers": headers, "client": self.client_address,
+                    "server": self.server.server_address, "state": {},
+                }
+                messages, received = [], False
+                async def receive():
+                    nonlocal received
+                    if not received:
+                        received = True
+                        return {"type": "http.request", "body": body, "more_body": False}
+                    return {"type": "http.disconnect"}
+                async def send(message):
+                    messages.append(message)
+                async def dispatch():
+                    async with server.session_manager.run():
+                        await app(scope, receive, send)
+                asyncio.run(dispatch())
+                start = next((m for m in messages if m.get("type") == "http.response.start"), None)
+                if start is None:
+                    return self.send_json(502, {"error": "MCP transport returned no HTTP response."})
+                response_body = b"".join(m.get("body", b"") for m in messages if m.get("type") == "http.response.body")
+                self.send_response(int(start.get("status", 500)))
+                has_length = False
+                for name, value in start.get("headers", []):
+                    if name.lower() == b"content-length":
+                        has_length = True
+                    self.send_header(name.decode("latin-1"), value.decode("latin-1"))
+                if not has_length:
+                    self.send_header("Content-Length", str(len(response_body)))
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.end_headers()
+                if response_body:
+                    self.wfile.write(response_body)
+            except OSError:
+                return
+            except Exception:
+                return self.send_json(500, {"error": "MCP request failed."})
+
         def do_GET(self):
             parsed=urlsplit(self.path)
             path=parsed.path
@@ -266,6 +337,8 @@ def create_server(*, coordinator=None, api_token=None, host="127.0.0.1", port=0)
             return self.send_json(404,{"error":"Not found."})
         def do_POST(self):
             route=urlsplit(self.path).path
+            if route == "/mcp":
+                return self.handle_mcp_post()
             if route not in {"/v1/invoke", "/v1/lifecycle", "/v1/providers/test", "/v1/improvements/propose", "/v1/quality-evaluations", "/v1/subagents/run"}: return self.send_json(404,{"error":"Not found."})
             is_lifecycle=route=="/v1/lifecycle"
             is_provider_test=route=="/v1/providers/test"

@@ -10,7 +10,7 @@ RUN git init /tmp/ffmpeg-src \
  && cd /tmp/ffmpeg-src \
  && ./configure --prefix=/opt/ffmpeg --enable-gpl --enable-libx264 --disable-debug --disable-doc --disable-ffplay \
  && make -j2 && make install \
- && /opt/ffmpeg/bin/ffmpeg -version | grep -E '^ffmpeg version 7\\.' \
+ && /opt/ffmpeg/bin/ffmpeg -version | grep -F 'ffmpeg version 7.' \
  && rm -rf /tmp/ffmpeg-src
 ENV PATH="/opt/ffmpeg/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 RUN git init /opt/lemo-opuscar \
@@ -19,7 +19,7 @@ RUN git init /opt/lemo-opuscar \
  && git -C /opt/lemo-opuscar checkout --detach 5c05490cc55dfb54f8f4c333f0f0e79cb6500564 \
  && cd /opt/lemo-opuscar && npm ci --omit=dev \
  && test "$(git -C /opt/lemo-opuscar rev-parse HEAD)" = "5c05490cc55dfb54f8f4c333f0f0e79cb6500564" \
- && node --version | grep -E '^v20\\.'
+ && node -e 'if (Number(process.versions.node.split(".")[0]) < 20) process.exit(1)'
 COPY renderer/worker.py /app/worker.py
 RUN groupadd --gid 10001 creator && useradd --uid 10001 --gid 10001 --home-dir /tmp/creator --no-create-home --shell /usr/sbin/nologin creator \
  && chmod 0555 /app/worker.py && chown -R root:root /opt/lemo-opuscar /app

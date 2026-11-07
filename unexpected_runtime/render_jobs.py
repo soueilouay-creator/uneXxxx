@@ -46,6 +46,7 @@ def build_docker_command(input_dir:str|Path,output_dir:str|Path,*,image:str,limi
  if src==dst or _inside(src,dst) or _inside(dst,src):raise ValueError("Renderer input/output mounts must not overlap.")
  if any("," in str(p) or "\n" in str(p) for p in (src,dst)):raise ValueError("Unsupported mount path characters.")
  dst.mkdir(parents=True,exist_ok=True)
+ dst.chmod(0o777)  # dedicated disposable output mount; worker UID/GID is 10001
  policy=limits or {"cpu_seconds":240,"memory_mb":2048,"wall_time_seconds":900}
  if set(policy)!=_ALLOWED_LIMITS:raise ValueError("Limits must contain exactly cpu_seconds, memory_mb and wall_time_seconds.")
  cpu,mem,wall=(policy["cpu_seconds"],policy["memory_mb"],policy["wall_time_seconds"])

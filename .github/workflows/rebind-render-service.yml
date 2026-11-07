@@ -1,0 +1,278 @@
+name: Rebind existing Render service without deploying
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      confirm_rebind:
+        description: "Type the exact confirmation to reapply the source binding"
+        required: true
+        type: choice
+        options:
+          - apply-render-source-rebind
+
+permissions:
+  contents: read
+
+concurrency:
+  group: render-source-rebind-srv-dbk8217b9u1s73ftauig
+  cancel-in-progress: false
+
+jobs:
+  rebind:
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.merged == true && github.event.pull_request.number == 6)
+    name: Rebind canonical source (no deployment)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Validate manual confirmation and API credential
+        shell: bash
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          CONFIRM_REBIND: ${{ inputs.confirm_rebind }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && "${CONFIRM_REBIND:-}" != "apply-render-source-rebind" ]]; then
+            echo "::error::Manual dispatch confirmation did not match. No Render request was made."
+            exit 1
+          fi
+          if [[ -z "${RENDER_API_KEY:-}" ]]; then
+            echo "::error::Repository secret RENDER_API_KEY is missing. Add it in GitHub Settings → Secrets and variables → Actions. No Render request was made."
+            exit 1
+          fi
+          echo "Render API credential is present; its value is not displayed."
+
+      - name: Identify the configured Neon branch without exposing secrets
+        shell: bash
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          SERVICE_ID: srv-dbk8217b9u1s73ftauig
+          WORKSPACE_ID: tea-dbh2cpks728c73amdq90
+        run: |
+          set -euo pipefail
+
+          service_vars="$(curl --silent --show-error --fail-with-body \
+            --connect-timeout 10 --max-time 30 \
+            --url "https://api.render.com/v1/services/${SERVICE_ID}/env-vars?limit=100" \
+            --header "Authorization: Bearer ${RENDER_API_KEY}" \
+            --header "Accept: application/json")"
+
+          database_url="$(printf '%s' "${service_vars}" | jq -r \
+            '[.[] | (.envVar // .) | select(.key == "DATABASE_URL") | .value][0] // empty')"
+
+          if [[ -z "${database_url}" ]]; then
+            groups="$(curl --silent --show-error --fail-with-body \
+              --connect-timeout 10 --max-time 30 \
+              --url "https://api.render.com/v1/env-groups?ownerId=${WORKSPACE_ID}&limit=100" \
+              --header "Authorization: Bearer ${RENDER_API_KEY}" \
+              --header "Accept: application/json")"
+
+            group_ids="$(printf '%s' "${groups}" | jq -r --arg service "${SERVICE_ID}" '.[] | (.envGroup // .) | select(any(.serviceLinks[]?; .id == $service)) | [.createdAt, .id] | @tsv' | sort -r | cut -f2)"
+
+            while IFS= read -r group_id; do
+              [[ -n "${group_id}" ]] || continue
+              group="$(curl --silent --show-error --fail-with-body \
+                --connect-timeout 10 --max-time 30 \
+                --url "https://api.render.com/v1/env-groups/${group_id}" \
+                --header "Authorization: Bearer ${RENDER_API_KEY}" \
+                --header "Accept: application/json")"
+              candidate="$(printf '%s' "${group}" | jq -r \
+                '[.envVars[]? | select(.key == "DATABASE_URL") | .value][0] // empty')"
+              if [[ -n "${candidate}" ]]; then
+                database_url="${candidate}"
+                break
+              fi
+            done <<< "${group_ids}"
+          fi
+
+          if [[ -z "${database_url}" ]]; then
+            echo "::error::DATABASE_URL was not found on the service or its linked environment groups. No source change was made."
+            exit 1
+          fi
+
+          database_host="$(DATABASE_URL="${database_url}" python - <<'PY'
+          import os
+          from urllib.parse import urlsplit
+
+          parsed = urlsplit(os.environ["DATABASE_URL"])
+          if parsed.scheme not in {"postgres", "postgresql"} or not parsed.hostname:
+              raise SystemExit("DATABASE_URL is not a PostgreSQL URI; value withheld.")
+          host = parsed.hostname
+          if not host.startswith("ep-") or not host.endswith(".c-7.eu-central-1.aws.neon.tech"):
+              raise SystemExit(f"Configured database host is not in the expected Neon project region: {host}")
+          print(host)
+          PY
+          )"
+
+          unset database_url
+          echo "Configured Neon database host: ${database_host}"
+          echo "The connection string and credentials were not printed."
+
+      - name: Confirm current source is the expected legacy or target binding
+        shell: bash
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          SERVICE_ID: srv-dbk8217b9u1s73ftauig
+          LEGACY_REPO: https://github.com/soueilouay-creator/uneXpected-
+          LEGACY_BRANCH: feat/unified-v8-foundation
+          TARGET_REPO: https://github.com/soueilouay-creator/uneXxxx
+          TARGET_BRANCH: main
+        run: |
+          set -euo pipefail
+          current="$(curl --silent --show-error --fail-with-body \
+            --connect-timeout 10 --max-time 30 \
+            --url "https://api.render.com/v1/services/${SERVICE_ID}" \
+            --header "Authorization: Bearer ${RENDER_API_KEY}" \
+            --header "Accept: application/json")"
+          if ! printf '%s' "${current}" | jq -e \
+            --arg id "${SERVICE_ID}" \
+            --arg legacyRepo "${LEGACY_REPO}" \
+            --arg legacyBranch "${LEGACY_BRANCH}" \
+            --arg targetRepo "${TARGET_REPO}" \
+            --arg targetBranch "${TARGET_BRANCH}" \
+            '.id == $id and (((.repo == $legacyRepo) and (.branch == $legacyBranch)) or ((.repo == $targetRepo) and (.branch == $targetBranch))) and .autoDeployTrigger == "off"' >/dev/null; then
+            echo "::error::Render service preconditions do not match. Safe service fields:"
+            printf '%s' "${current}" | jq -c '{id, repo, branch, autoDeployTrigger}' >&2 || true
+            exit 1
+          fi
+          echo "Current service identity, source and disabled auto-deploy match the expected cutover preconditions."
+
+      - name: Rebind the existing service and verify the saved settings
+        shell: bash
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          SERVICE_ID: srv-dbk8217b9u1s73ftauig
+          TARGET_REPO: https://github.com/soueilouay-creator/uneXxxx
+          TARGET_BRANCH: main
+        run: |
+          set -euo pipefail
+
+          payload="$(jq -n \
+            --arg repo "${TARGET_REPO}" \
+            --arg branch "${TARGET_BRANCH}" \
+            '{repo: $repo, branch: $branch, autoDeployTrigger: "off"}')"
+
+          patched=""
+          if ! patched="$(curl --silent --show-error --fail-with-body \
+            --connect-timeout 10 --max-time 30 \
+            --request PATCH \
+            --url "https://api.render.com/v1/services/${SERVICE_ID}" \
+            --header "Authorization: Bearer ${RENDER_API_KEY}" \
+            --header "Accept: application/json" \
+            --header "Content-Type: application/json" \
+            --data "${payload}")"; then
+            echo "::error::Render PATCH failed. Sanitized error details:"
+            printf '%s' "${patched}" | jq -c '{code, message}' >&2 || true
+            exit 1
+          fi
+
+          if ! printf '%s' "${patched}" | jq -e \
+            --arg id "${SERVICE_ID}" \
+            --arg repo "${TARGET_REPO}" \
+            --arg branch "${TARGET_BRANCH}" \
+            '.id == $id and .repo == $repo and .branch == $branch and .autoDeployTrigger == "off"' >/dev/null; then
+            echo "::error::Render PATCH response does not match the target. Safe returned fields:"
+            printf '%s' "${patched}" | jq -c '{id, repo, branch, autoDeployTrigger}' >&2 || true
+            exit 1
+          fi
+
+          verified=""
+          if ! verified="$(curl --silent --show-error --fail-with-body \
+            --connect-timeout 10 --max-time 30 \
+            --request GET \
+            --url "https://api.render.com/v1/services/${SERVICE_ID}" \
+            --header "Authorization: Bearer ${RENDER_API_KEY}" \
+            --header "Accept: application/json")"; then
+            echo "::error::Render verification GET failed. Sanitized error details:"
+            printf '%s' "${verified}" | jq -c '{code, message}' >&2 || true
+            exit 1
+          fi
+
+          if ! printf '%s' "${verified}" | jq -e \
+            --arg id "${SERVICE_ID}" \
+            --arg repo "${TARGET_REPO}" \
+            --arg branch "${TARGET_BRANCH}" \
+            '.id == $id and .repo == $repo and .branch == $branch and .autoDeployTrigger == "off"' >/dev/null; then
+            echo "::error::Render GET verification returned unexpected settings. Safe returned fields:"
+            printf '%s' "${verified}" | jq -c '{id, repo, branch, autoDeployTrigger}' >&2 || true
+            exit 1
+          fi
+
+          echo "Verified existing service ${SERVICE_ID}: canonical repository and main branch are saved; automatic deployment remains off."
+          echo "No deployment was requested by this workflow."
+
+      - name: Verify a real OpenRouter call through the hosted runtime
+        shell: bash
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          SERVICE_ID: srv-dbk8217b9u1s73ftauig
+          WORKSPACE_ID: tea-dbh2cpks728c73amdq90
+          SERVICE_URL: https://unexpected-v8-command-center.onrender.com
+        run: |
+          set -euo pipefail
+
+          service_vars="$(curl --silent --show-error --fail-with-body \
+            --connect-timeout 10 --max-time 30 \
+            --url "https://api.render.com/v1/services/${SERVICE_ID}/env-vars?limit=100" \
+            --header "Authorization: Bearer ${RENDER_API_KEY}" \
+            --header "Accept: application/json")"
+
+          runtime_token="$(printf '%s' "${service_vars}" | jq -r \
+            '[.[] | (.envVar // .) | select(.key == "UNEXPECTED_RUNTIME_API_TOKEN") | .value][0] // empty')"
+
+          if [[ -z "${runtime_token}" ]]; then
+            groups="$(curl --silent --show-error --fail-with-body \
+              --connect-timeout 10 --max-time 30 \
+              --url "https://api.render.com/v1/env-groups?ownerId=${WORKSPACE_ID}&limit=100" \
+              --header "Authorization: Bearer ${RENDER_API_KEY}" \
+              --header "Accept: application/json")"
+
+            group_ids="$(printf '%s' "${groups}" | jq -r --arg service "${SERVICE_ID}" '.[] | (.envGroup // .) | select(any(.serviceLinks[]?; .id == $service)) | [.createdAt, .id] | @tsv' | sort -r | cut -f2)"
+
+            while IFS= read -r group_id; do
+              [[ -n "${group_id}" ]] || continue
+              group="$(curl --silent --show-error --fail-with-body \
+                --connect-timeout 10 --max-time 30 \
+                --url "https://api.render.com/v1/env-groups/${group_id}" \
+                --header "Authorization: Bearer ${RENDER_API_KEY}" \
+                --header "Accept: application/json")"
+              candidate="$(printf '%s' "${group}" | jq -r \
+                '[.envVars[]? | select(.key == "UNEXPECTED_RUNTIME_API_TOKEN") | .value][0] // empty')"
+              if [[ -n "${candidate}" ]]; then
+                runtime_token="${candidate}"
+                break
+              fi
+            done <<< "${group_ids}"
+          fi
+
+          if [[ -z "${runtime_token}" ]]; then
+            echo "::error::UNEXPECTED_RUNTIME_API_TOKEN was not found. No authenticated provider request was made."
+            exit 1
+          fi
+
+          response=""
+          if ! response="$(curl --silent --show-error --fail-with-body \
+            --connect-timeout 10 --max-time 30 \
+            --request POST \
+            --url "${SERVICE_URL}/v1/providers/test" \
+            --header "Authorization: Bearer ${runtime_token}" \
+            --header "Content-Type: application/json" \
+            --header "Accept: application/json" \
+            --data '{"provider_route":"openrouter"}')"; then
+            echo "::error::Hosted OpenRouter test request failed. Sanitized response:"
+            printf '%s' "${response}" | jq -c '{ok, error}' >&2 || true
+            exit 1
+          fi
+
+          if ! printf '%s' "${response}" | jq -e \
+            '.ok == true and .verified == true and .provider_route == "openrouter" and .provider != "deterministic-mock"' >/dev/null; then
+            echo "::error::Hosted runtime did not verify a real OpenRouter provider. Sanitized response:"
+            printf '%s' "${response}" | jq -c '{ok, error, provider_route, provider, model, latency_ms, verified}' >&2 || true
+            exit 1
+          fi
+
+          printf '%s' "${response}" | jq -r \
+            '"OpenRouter verified through hosted runtime: provider=\(.provider), model=\(.model), latency_ms=\(.latency_ms)."'
+          echo "The runtime bearer token and provider key were not printed."

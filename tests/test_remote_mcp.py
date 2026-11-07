@@ -115,6 +115,75 @@ class RemoteMCPHTTPTests(unittest.TestCase):
         self.assertNotIn("OPENROUTER_API_KEY", serialized)
         self.assertNotIn("DATABASE_URL", serialized)
 
+    def test_remote_mcp_agent_task_returns_task_id_without_waiting(self):
+        started = threading.Event()
+        release = threading.Event()
+        response_box = []
+
+        def delayed_execution(request, token):
+            started.set()
+            if not release.wait(timeout=4):
+                raise RuntimeError("test release was not signalled")
+            self.coordinator.store.mark_task(request.task_id, "running")
+            self.coordinator.store.mark_task(
+                request.task_id, "completed", {"status": "completed", "output": "synthetic result"}
+            )
+
+        self.coordinator._execute_with_deadline = delayed_execution
+        request = {
+            "name": "run_task",
+            "arguments": {
+                "agent_id": "project-manager",
+                "objective": "Prepare a synthetic internal task result.",
+                "inputs": {"synthetic_fixture": True},
+                "provider_route": "synthetic-live",
+                "deadline_seconds": 20,
+                "max_steps": 1,
+            },
+        }
+
+        with patch("unexpected_runtime.mcp_server._live_route", return_value="synthetic-live"):
+            client = threading.Thread(
+                target=lambda: response_box.append(self.request_mcp(
+                    "tools/call", request, token=self.token, tool_name="run_task"
+                )),
+                daemon=True,
+            )
+            client.start()
+            try:
+                self.assertTrue(started.wait(timeout=2), "agent task worker did not start")
+                client.join(timeout=1)
+                self.assertFalse(
+                    client.is_alive(),
+                    "MCP run_task must return the persisted task ID without waiting for provider work",
+                )
+                self.assertEqual(len(response_box), 1)
+                status, body = response_box[0]
+                self.assertEqual(status, 200, body)
+                result = body["result"].get("structuredContent")
+                if not isinstance(result, dict):
+                    result = {}
+                    for item in body["result"].get("content", []):
+                        if item.get("type") == "text":
+                            try:
+                                candidate = json.loads(item.get("text", ""))
+                            except (TypeError, ValueError):
+                                continue
+                            if isinstance(candidate, dict):
+                                result = candidate
+                                break
+                task_id = result.get("task_id")
+                self.assertIsInstance(task_id, str)
+                self.assertTrue(task_id)
+            finally:
+                release.set()
+                client.join(timeout=3)
+
+        row = self.coordinator.store.get_task(task_id)
+        self.assertIsNotNone(row)
+        self.assertEqual(row["status"], "completed", row)
+        self.assertEqual(json.loads(row["result_json"])["output"], "synthetic result")
+
     def test_remote_mcp_sales_tool_refuses_unverified_or_mock_provider(self):
         status, body = self.request_mcp(
             "tools/call",

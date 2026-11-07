@@ -156,13 +156,13 @@ jobs:
             }')"
             curl --silent --show-error --fail-with-body \
               --connect-timeout 15 --max-time 120 \
-              --request POST --url "\${SERVICE_URL}/mcp" \
-              --header "Authorization: Bearer \${RUNTIME_TOKEN}" \
+              --request POST --url "${SERVICE_URL}/mcp" \
+              --header "Authorization: Bearer ${RUNTIME_TOKEN}" \
               --header "Content-Type: application/json" \
               --header "Accept: application/json, text/event-stream" \
-              --header "Mcp-Method: \${method}" \
+              --header "Mcp-Method: ${method}" \
               --header "MCP-Protocol-Version: 2026-07-28" \
-              --data "\${body}"
+              --data "${body}" "$@"
           }
 
           mcp_tool() {
@@ -171,8 +171,8 @@ jobs:
             local params
             params="$(jq -cn --arg name "$name" --argjson arguments "$arguments" \
               '{name: $name, arguments: $arguments}')"
-            mcp_request "tools/call" "\${params}" \
-              --header "Mcp-Name: \${name}"
+            mcp_request "tools/call" "${params}" \
+              --header "Mcp-Name: ${name}"
           }
 
           structured_result() {
@@ -192,39 +192,39 @@ jobs:
               "io.modelcontextprotocol/clientCapabilities":{}
             }}
           }')"
-          anonymous_code="$(curl --silent --show-error --output "\${RUNNER_TEMP}/anonymous-mcp.json" \
+          anonymous_code="$(curl --silent --show-error --output "${RUNNER_TEMP}/anonymous-mcp.json" \
             --write-out '%{http_code}' --connect-timeout 10 --max-time 20 \
-            --request POST --url "\${SERVICE_URL}/mcp" \
+            --request POST --url "${SERVICE_URL}/mcp" \
             --header "Content-Type: application/json" \
             --header "Accept: application/json, text/event-stream" \
             --header "Mcp-Method: tools/list" \
             --header "MCP-Protocol-Version: 2026-07-28" \
-            --data "\${anonymous_body}")"
-          if [[ "\${anonymous_code}" != "401" ]]; then
-            echo "::error::Expected anonymous /mcp to return 401; received \${anonymous_code}."
+            --data "${anonymous_body}")"
+          if [[ "${anonymous_code}" != "401" ]]; then
+            echo "::error::Expected anonymous /mcp to return 401; received ${anonymous_code}."
             exit 1
           fi
 
           catalog="$(mcp_request "tools/list" '{}')"
-          printf '%s' "\${catalog}" | jq -e '
+          printf '%s' "${catalog}" | jq -e '
             ([.result.tools[].name] | sort) ==
             ["get_task","get_task_events","list_agents","list_tasks","run_sales_workflow","run_task","runtime_status"]
           ' >/dev/null
           echo "Authenticated /mcp catalog returned 7 governed tools; anonymous access returned 401."
 
           status="$(mcp_tool "runtime_status" '{}')"
-          status_data="$(printf '%s' "\${status}" | structured_result)"
-          printf '%s' "\${status_data}" | jq -e \
+          status_data="$(printf '%s' "${status}" | structured_result)"
+          printf '%s' "${status_data}" | jq -e \
             '.registered_agents == 38 and .health == "ready" and .storage_healthy == true' >/dev/null
 
           agents="$(mcp_tool "list_agents" '{}')"
-          agents_data="$(printf '%s' "\${agents}" | structured_result)"
-          printf '%s' "\${agents_data}" | jq -e '.count == 38 and (.items | length == 38)' >/dev/null
+          agents_data="$(printf '%s' "${agents}" | structured_result)"
+          printf '%s' "${agents_data}" | jq -e '.count == 38 and (.items | length == 38)' >/dev/null
 
           tasks_before="$(mcp_tool "list_tasks" '{"limit":10}')"
-          printf '%s' "\${tasks_before}" | structured_result | jq -e '.count >= 0' >/dev/null
+          printf '%s' "${tasks_before}" | structured_result | jq -e '.count >= 0' >/dev/null
 
-          sales_args="$(jq -cn --arg run "\${GITHUB_RUN_ID}" '{
+          sales_args="$(jq -cn --arg run "${GITHUB_RUN_ID}" '{
             objective: "Run a Shopify commerce-readiness workflow for the connected test store. Assess store readiness from supplied verified shop facts; identify setup blockers, product-catalogue prerequisites, order/payment/fulfillment checks, and the next three internal actions. Do not invent products, customers, orders, revenue, traffic or payment status. Distinguish verified facts from unknowns. Internal test only.",
             inputs: {
               verification_scope: "read-only Shopify context from connected Shopify Admin integration; internal draft-only test",
@@ -252,14 +252,14 @@ jobs:
             max_improvements: 1
           }')"
 
-          sales_response="$(mcp_tool "run_sales_workflow" "\${sales_args}")"
-          sales_data="$(printf '%s' "\${sales_response}" | structured_result)"
-          printf '%s' "\${sales_data}" | jq -e \
+          sales_response="$(mcp_tool "run_sales_workflow" "${sales_args}")"
+          sales_data="$(printf '%s' "${sales_response}" | structured_result)"
+          printf '%s' "${sales_data}" | jq -e \
             '.result.status == "delivered" and .result.delivered == true and (.result.workflow_id | type == "string" and length > 0)' >/dev/null
 
-          task_ids="$(printf '%s' "\${sales_data}" | jq -r \
+          task_ids="$(printf '%s' "${sales_data}" | jq -r \
             '[.. | objects | .task_id? // empty | select(type == "string" and length > 0)] | unique[]')"
-          if [[ -z "\${task_ids}" ]]; then
+          if [[ -z "${task_ids}" ]]; then
             echo "::error::Shopify workflow returned no persistent task IDs."
             exit 1
           fi
@@ -267,36 +267,33 @@ jobs:
           first_task=""
           checked=0
           while IFS= read -r task_id; do
-            [[ -n "\${task_id}" ]] || continue
-            [[ -n "\${first_task}" ]] || first_task="\${task_id}"
-            task_response="$(mcp_tool "get_task" "$(jq -cn --arg id "\${task_id}" '{task_id:$id}')")"
-            task_data="$(printf '%s' "\${task_response}" | structured_result)"
-            printf '%s' "\${task_data}" | jq -e --arg id "\${task_id}" '.task.task_id == $id' >/dev/null
+            [[ -n "${task_id}" ]] || continue
+            [[ -n "${first_task}" ]] || first_task="${task_id}"
+            task_response="$(mcp_tool "get_task" "$(jq -cn --arg id "${task_id}" '{task_id:$id}')")"
+            task_data="$(printf '%s' "${task_response}" | structured_result)"
+            printf '%s' "${task_data}" | jq -e --arg id "${task_id}" '.task.task_id == $id' >/dev/null
 
             events_response="$(mcp_tool "get_task_events" \
-              "$(jq -cn --arg id "\${task_id}" '{task_id:$id,after_event_id:0,limit:50}')")"
-            events_data="$(printf '%s' "\${events_response}" | structured_result)"
-            printf '%s' "\${events_data}" | jq -e '.count > 0 and (.items | length > 0)' >/dev/null
+              "$(jq -cn --arg id "${task_id}" '{task_id:$id,after_event_id:0,limit:50}')")"
+            events_data="$(printf '%s' "${events_response}" | structured_result)"
+            printf '%s' "${events_data}" | jq -e '.count > 0 and (.items | length > 0)' >/dev/null
             checked=$((checked + 1))
-          done <<< "\${task_ids}"
+          done <<< "${task_ids}"
 
-          if [[ -z "\${first_task}" || "\${checked}" -lt 1 ]]; then
+          if [[ -z "${first_task}" || "${checked}" -lt 1 ]]; then
             echo "::error::No task could be retrieved before restart."
             exit 1
           fi
-          echo "Shopify workflow delivered; \${checked} persisted task(s) and event histories were retrieved before restart."
-          echo "RECOVERY_TASK_IDS<<UNEEXPECTED_TASKS" >> "\${GITHUB_ENV}"
-          printf '%s\n' "\${task_ids}" >> "\${GITHUB_ENV}"
-          echo "UNEEXPECTED_TASKS" >> "\${GITHUB_ENV}"
+          echo "Shopify workflow delivered; ${checked} persisted task(s) and event histories were retrieved before restart."
 
-          restart_code="$(curl --silent --show-error --output "\${RUNNER_TEMP}/render-restart.json" \
+          restart_code="$(curl --silent --show-error --output "${RUNNER_TEMP}/render-restart.json" \
             --write-out '%{http_code}' --connect-timeout 10 --max-time 30 \
-            --request POST --url "https://api.render.com/v1/services/\${SERVICE_ID}/restart" \
-            --header "Authorization: Bearer \${RENDER_API_KEY}" \
+            --request POST --url "https://api.render.com/v1/services/${SERVICE_ID}/restart" \
+            --header "Authorization: Bearer ${RENDER_API_KEY}" \
             --header "Accept: application/json")"
-          if [[ ! "\${restart_code}" =~ ^2[0-9][0-9]$ ]]; then
-            echo "::error::Render restart request failed (HTTP \${restart_code})."
-            cat "\${RUNNER_TEMP}/render-restart.json"
+          if [[ ! "${restart_code}" =~ ^2[0-9][0-9]$ ]]; then
+            echo "::error::Render restart request failed (HTTP ${restart_code})."
+            cat "${RUNNER_TEMP}/render-restart.json"
             exit 1
           fi
 
@@ -304,35 +301,35 @@ jobs:
           for attempt in $(seq 1 60); do
             sleep 5
             if curl --silent --show-error --fail --connect-timeout 5 --max-time 10 \
-                --url "\${SERVICE_URL}/health" --header "Accept: application/json" \
-                --output "\${RUNNER_TEMP}/health-after-restart.json"; then
+                --url "${SERVICE_URL}/health" --header "Accept: application/json" \
+                --output "${RUNNER_TEMP}/health-after-restart.json"; then
               if jq -e '.ok == true and .storage == "ready"' \
-                  "\${RUNNER_TEMP}/health-after-restart.json" >/dev/null; then
+                  "${RUNNER_TEMP}/health-after-restart.json" >/dev/null; then
                 healthy="true"
                 break
               fi
             fi
           done
-          if [[ "\${healthy}" != "true" ]]; then
+          if [[ "${healthy}" != "true" ]]; then
             echo "::error::Runtime did not return healthy after the requested restart."
             exit 1
           fi
 
           post_restart_checks=0
           while IFS= read -r task_id; do
-            [[ -n "\${task_id}" ]] || continue
-            task_response="$(mcp_tool "get_task" "$(jq -cn --arg id "\${task_id}" '{task_id:$id}')")"
-            task_data="$(printf '%s' "\${task_response}" | structured_result)"
-            printf '%s' "\${task_data}" | jq -e --arg id "\${task_id}" '.task.task_id == $id' >/dev/null
+            [[ -n "${task_id}" ]] || continue
+            task_response="$(mcp_tool "get_task" "$(jq -cn --arg id "${task_id}" '{task_id:$id}')")"
+            task_data="$(printf '%s' "${task_response}" | structured_result)"
+            printf '%s' "${task_data}" | jq -e --arg id "${task_id}" '.task.task_id == $id' >/dev/null
 
             events_response="$(mcp_tool "get_task_events" \
-              "$(jq -cn --arg id "\${task_id}" '{task_id:$id,after_event_id:0,limit:50}')")"
-            events_data="$(printf '%s' "\${events_response}" | structured_result)"
-            printf '%s' "\${events_data}" | jq -e '.count > 0 and (.items | length > 0)' >/dev/null
+              "$(jq -cn --arg id "${task_id}" '{task_id:$id,after_event_id:0,limit:50}')")"
+            events_data="$(printf '%s' "${events_response}" | structured_result)"
+            printf '%s' "${events_data}" | jq -e '.count > 0 and (.items | length > 0)' >/dev/null
             post_restart_checks=$((post_restart_checks + 1))
-          done <<< "\${RECOVERY_TASK_IDS}"
+          done <<< "${task_ids}"
 
-          if [[ "\${post_restart_checks}" -ne "\${checked}" ]]; then
+          if [[ "${post_restart_checks}" -ne "${checked}" ]]; then
             echo "::error::Task recovery count changed after restart."
             exit 1
           fi

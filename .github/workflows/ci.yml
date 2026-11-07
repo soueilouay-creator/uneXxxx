@@ -55,6 +55,8 @@ jobs:
                 end
               when Psych::Nodes::Sequence
                 node.children.each { |child| reject_duplicate_yaml_keys(child, path) }
+              else
+                node.children.each { |child| reject_duplicate_yaml_keys(child, path) } if node.respond_to?(:children)
               end
             end
 

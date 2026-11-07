@@ -308,12 +308,14 @@ class CommandCenterAPITests(unittest.TestCase):
         self.assertEqual(self.request("GET", "/v1/mcp/tools")[0], 401)
         status, skills = self.request("GET", "/v1/skills", token=self.token)
         self.assertEqual(status, 200)
-        self.assertEqual(skills["count"], 4)
+        self.assertEqual(skills["count"], 3)
+        self.assertEqual(
+            {item["id"] for item in skills["items"]},
+            {"creative-media", "skill-engineering", "self-improvement"},
+        )
         self.assertTrue(all(item["status"] == "active" for item in skills["items"]))
         self.assertTrue(all("trigger_terms" in item for item in skills["items"]))
-        sales_skill = next(item for item in skills["items"] if item["id"] == "industrial-maintenance-sales")
-        self.assertEqual(sales_skill["invocation_mode"], "automatic")
-        self.assertEqual(sales_skill["allowed_tools"], [])
+        self.assertNotIn("industrial-maintenance-sales", {item["id"] for item in skills["items"]})
         tools_status, tools = self.request("GET", "/v1/mcp/tools", token=self.token)
         self.assertEqual(tools_status, 200)
         self.assertEqual(tools["items"], [])

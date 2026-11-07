@@ -417,37 +417,28 @@ class SkillAPITests(unittest.TestCase):
 
 
 class IndustrialMaintenanceSalesSkillTests(unittest.TestCase):
-    def test_sales_intel_auto_loads_sales_skill_and_peer_roles_are_scoped(self):
+    def test_archived_sales_skill_is_not_resolved_for_any_role(self):
         root = Path(__file__).resolve().parents[1]
         registry = SkillRegistry.load(package_root=root)
-        sales = registry.resolve_all(
-            "sales-intel",
-            "industrial maintenance sales control center preventive maintenance tracker and spare-parts tracker",
+        objective = (
+            "industrial maintenance sales control center preventive maintenance tracker "
+            "and spare-parts tracker"
         )
-        self.assertIn("industrial-maintenance-sales", [item.id for item in sales])
-
-        allowed = {
+        roles = {
             "sales-intel", "business-strategist", "maintenance-engineer",
             "marketing-seo", "data-analyst", "project-manager",
             "code-reviewer", "self-improvement-governor",
         }
-        for agent_id in allowed:
-            resolved = registry.resolve_all(
-                agent_id,
-                "industrial maintenance sales control center preventive maintenance tracker",
-            )
-            self.assertIn("industrial-maintenance-sales", [item.id for item in resolved])
+        for agent_id in roles:
+            with self.subTest(agent_id=agent_id):
+                resolved = registry.resolve_all(agent_id, objective)
+                self.assertNotIn("industrial-maintenance-sales", [item.id for item in resolved])
 
-        unrelated = registry.resolve_all("sales-intel", "write a fantasy short story")
-        self.assertNotIn("industrial-maintenance-sales", [item.id for item in unrelated])
-
-    def test_sales_skill_context_contains_explicit_gates_and_does_not_claim_connectors(self):
+    def test_archived_sales_source_retains_its_historical_safety_gates(self):
         root = Path(__file__).resolve().parents[1]
-        registry = SkillRegistry.load(package_root=root)
-        skill = next(item for item in registry.resolve_all(
-            "sales-intel", "industrial maintenance sales control center"
-        ) if item.id == "industrial-maintenance-sales")
-        context = registry.read_context(skill).lower()
+        source = (root / "skills/industrial-maintenance-sales/SKILL.md").read_text(encoding="utf-8")
+        self.assertTrue(source.startswith("# ARCHIVED — NOT ACTIVE (2026-11-07)"))
+        context = source.lower()
         for token in (
             "human reply", "demo is booked only", "no automatic email sends",
             "change recipients by guess", "synthetic data", "test hypotheses",

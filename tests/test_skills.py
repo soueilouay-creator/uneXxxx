@@ -167,10 +167,10 @@ class SkillRegistryTests(unittest.TestCase):
             try:
                 coordinator.invoke('voice-agent', 'Create a video voiceover with clear narration')
                 system_prompt = provider.requests[-1]['system_prompt']
-                self.assertIn('Creative Media Studio', system_prompt)
+                self.assertIn('uneXpected Creator Studio', system_prompt)
                 coordinator.invoke('voice-agent', 'Explain routine maintenance principles')
                 system_prompt = provider.requests[-1]['system_prompt']
-                self.assertNotIn('Creative Media Studio', system_prompt)
+                self.assertNotIn('uneXpected Creator Studio', system_prompt)
                 events = coordinator.store.events(100)
                 self.assertIn('skill_context_attached', {e['event_type'] for e in events})
             finally:

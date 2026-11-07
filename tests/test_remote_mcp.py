@@ -43,7 +43,13 @@ class RemoteMCPHTTPTests(unittest.TestCase):
             "jsonrpc": "2.0",
             "id": request_id,
             "method": method,
-            "params": params,
+            "params": {
+                **params,
+                "_meta": {
+                    "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                    "io.modelcontextprotocol/clientCapabilities": {},
+                },
+            },
         })
         headers = {
             "Content-Type": "application/json",

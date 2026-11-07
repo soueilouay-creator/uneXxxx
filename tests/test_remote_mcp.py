@@ -189,7 +189,11 @@ class RemoteMCPHTTPTests(unittest.TestCase):
                 release.set()
                 client.join(timeout=3)
 
+        deadline = time.monotonic() + 3
         row = self.coordinator.store.get_task(task_id)
+        while row and row.get("status") not in {"completed", "failed", "cancelled", "timeout"} and time.monotonic() < deadline:
+            time.sleep(0.01)
+            row = self.coordinator.store.get_task(task_id)
         self.assertIsNotNone(row)
         self.assertEqual(row["status"], "completed", row)
         self.assertEqual(json.loads(row["result_json"])["output"], "synthetic result")

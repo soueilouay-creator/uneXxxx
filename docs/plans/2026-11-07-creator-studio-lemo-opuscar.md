@@ -40,38 +40,40 @@
 - Consumes: Skill manifest schema v2; existing IDs `creative-media`, `skill-engineering`, `self-improvement`; canonical roles `creative-director`, `media-producer`, `voice-agent`, `marketing-seo`, `code-reviewer`, `qa-engineer`, `project-manager`, `self-improvement-governor`.
 - Produces: updated `creative-media` Skill content and a schema-v2 `resources[]` entry with `kind: "reference"`, exact path and SHA-256. Keep the current Skill ID stable for compatibility. Active Skill IDs become exactly `creative-media`, `skill-engineering` and `self-improvement`; the sales Skill is not loaded.
 
-- [ ] **Step 1: Add failing routing and archive tests**
+- [x] **Step 1: Add failing routing and archive tests**
 
 Update the existing Skill/structure tests to assert that video/Shorts/film objectives resolve to `creative-media` for mapped creative roles; the active manifest contains exactly the three IDs above; the sales Skill is absent from active routing but its source file remains and starts with a dated archived/not-active notice; the 38-role count and unique IDs remain unchanged; every active Skill and resource hash matches its bytes; and the Creator Studio reference calls Opuscar a code-based engine, not a hosted video model.
 
-- [ ] **Step 2: Verify the relevant failure**
+- [x] **Step 2: Verify the relevant failure**
 
 Run: `python -m unittest tests.test_skills tests.test_structure -v`
 
 Expected: new assertions fail against the current four-Skill manifest and the existing general-purpose creative-media instructions.
 
-- [ ] **Step 3: Implement the minimum routing change**
+- [x] **Step 3: Implement the minimum routing change**
 
 Rewrite the existing creative-media workflow as the Creator Studio procedure: brief/research, hook/script, treatment, style selection, storyboard/look, project authoring, render, encoded-media QA, human approval, platform packaging and evidence-backed learning. Add the Opuscar adapter reference and archive notice to the existing sales Skill. Remove only the sales record from the active manifest; update creative-media's version/description/triggers/resources/hash. Update README scope and append a dated superseding note to the architecture-freeze history. Regenerate the SHA-256 inventory from the actual tracked tree.
 
-- [ ] **Step 4: Verify the focused pass**
+- [x] **Step 4: Verify the focused pass**
 
 Run: `python -m unittest tests.test_skills tests.test_structure -v`
 
 Expected: all focused tests pass; there remain 38 canonical roles, three active Skills and one preserved archived sales Skill file.
 
-- [ ] **Step 5: Run the affected integration check**
+- [x] **Step 5: Run the affected integration check**
 
 Run: `python -m unittest discover -s tests -v`
 
 Expected: the complete suite passes, with only the already-optional v6 fixture skipped when not supplied. No prospect or customer records are read or mutated.
 
-- [ ] **Step 6: Commit the passing deliverable**
+- [x] **Step 6: Commit the passing deliverable**
 
 ```bash
 git add skills/creative-media/WORKFLOW.md skills/creative-media/references/lemo-opuscar-interface.md skills/industrial-maintenance-sales/SKILL.md skill_manifest.json tests/test_skills.py tests/test_structure.py README.md docs/ARCHITECTURE_FREEZE.md FILE_INVENTORY_SHA256.txt
 git commit -m "feat: refocus active workflow on creator studio"
 ```
+
+**Verification evidence (2026-11-07):** Full repository CI run [#42396950841](https://github.com/soueilouay-creator/uneXxxx/actions/runs/42396950841) passed on commit `60bd102fd09fbc5e008909e23bfa8e15afdaa8b0`: 270 tests passed with one optional v6 fixture skipped; source integrity fixture, Docker image build, actual-container smoke test and CLI smoke test all passed. The expected red phase was observed first on the earlier test-only commit. Sales source remains archived; historical sales data was not read or modified.
 
 ## Task 2: Add creator project, version, asset and state persistence
 

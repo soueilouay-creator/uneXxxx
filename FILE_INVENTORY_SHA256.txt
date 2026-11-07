@@ -61,7 +61,7 @@ c073c78a48cbe0e2686683fba08494bc6fce86355336d8a81186f131ef9bc46b  DEPLOY.md
 681088c6bdbdf3906c682db2caf6112466fa6694cc55de7f4c8925dadf680162  docs/plans/2026-11-02-resource-intelligence-ai-quality-evaluation.md
 c6882111f911f4e0de968b8aa3fbbb421d3550275876dc3a3f806b7f058503d9  docs/plans/2026-11-02-unexpected-v8-single-command-center.md
 aa178fdf08c04aed062b62a9affbc56f01c353dc41caba82346e3654a73631f9  docs/plans/2026-11-02-v8.1-librechat-adaptation.md
-85149a009a410e54b2e14acb62a9b39567ba29b5414be4d600611b39961aafd1  docs/plans/2026-11-07-creator-studio-lemo-opuscar.md
+32d965e2b0ddbeb7f62bfdd5f337cf5066b5a397bf024cb13b2606aa593b7582  docs/plans/2026-11-07-creator-studio-lemo-opuscar.md
 c5ebe574349cd4590621adc24d0ab834b31e924fd55778be429611add0ad8579  docs/RUNTIME_CONNECTIVITY.md
 214ee1be9fc51a5dc1f7666c860769208b962a1e483e56ccf75cd8b1cc6affed  docs/specs/2026-11-02-resource-intelligence-ai-quality-evaluation-design.md
 4e50f5d757a2c38fc5fa505b232a58226a854804c8fc9eeb2056b2dacb893d63  docs/specs/2026-11-02-unexpected-v8-unified-design.md

@@ -41,11 +41,13 @@ class Coordinator:
         self.subagents=SubagentRunner(self)
         self.max_workers=workers; self.max_retries=retries
         self.task_pool=ThreadPoolExecutor(max_workers=workers,thread_name_prefix='unexpected-task')
+        self.remote_mcp_pool=ThreadPoolExecutor(max_workers=max(1,min(workers,2)),thread_name_prefix='unexpected-mcp-task')
         self.provider_pool=ThreadPoolExecutor(max_workers=workers,thread_name_prefix='unexpected-provider')
         self._tokens={}
     def close(self):
         for token in list(self._tokens.values()): token.cancel()
         self.mcp_gateway.close()
+        self.remote_mcp_pool.shutdown(wait=True,cancel_futures=False)
         self.task_pool.shutdown(wait=True,cancel_futures=True); self.provider_pool.shutdown(wait=True,cancel_futures=True)
         close_store=getattr(self.store,'close',None)
         if callable(close_store): close_store()

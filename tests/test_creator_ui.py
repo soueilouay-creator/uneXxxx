@@ -26,7 +26,7 @@ class CreatorStudioUIContractTests(unittest.TestCase):
   self.assertIn("YouTube story film",self.html)
   self.assertIn("30–45 minutes",self.html)
   self.assertIn("maxlength=\"100000\"",self.html)
-  self.assertIn('value:"youtube_longform"',self.js)
+  self.assertIn('profile:"youtube_longform"',self.js)
   self.assertIn('render_mode:"story_film"',self.js)
   self.assertIn("creator-format-note",self.js)
 

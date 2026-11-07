@@ -180,9 +180,9 @@
     const longform=p.channel_profile?.youtube?.format==="longform";
     $("creator-format").value=longform?"youtube_longform":"youtube_shorts";
     $("creator-format-note").textContent=longform?"Long-form episodes use 1920×1080, illustrated scenes, narration WAV and timed subtitles. Vertical derivatives are separate.":"Vertical 9:16 motion master for Shorts and TikTok.";
-    const latest=versions[versions.length-1]?.content||{};
-    $("creator-hook").value=latest.hook||"";$("creator-script").value=latest.script||"";
-    $("creator-scenes").value=JSON.stringify(latest.scenes||[{scene_id:"scene-01",image:"scenes/scene-01.png",duration_seconds:45,visual_prompt:"Opening visual",narration:"Opening hook",on_screen_text:"A story begins"}],null,2);
+    const latestVersion=versions[versions.length-1]?.content||{};
+    $("creator-hook").value=latestVersion.hook||"";$("creator-script").value=latestVersion.script||"";
+    $("creator-scenes").value=JSON.stringify(latestVersion.scenes||[{scene_id:"scene-01",image:"scenes/scene-01.png",duration_seconds:45,visual_prompt:"Opening visual",narration:"Opening hook",on_screen_text:"A story begins"}],null,2);
     $("creator-project-status").textContent=p.status||"idea";
     $("creator-save-version").disabled=false;
     $("creator-version-state").textContent="Project selected · "+versions.length+" saved versions";
@@ -315,6 +315,10 @@
       await refresh();await loadCreatorProject(result.project.project_id);toast("Creator project created");
     } catch(error){$("creator-create-result").textContent="Project not saved: "+error.message;toast(error.message);}
     finally{button.disabled=false;}
+  });
+  $("creator-format").addEventListener("change",()=>{
+    const longform=$("creator-format").value==="youtube_longform";
+    $("creator-format-note").textContent=longform?"Long-form episodes use 1920×1080, illustrated scenes, narration WAV and timed subtitles. Vertical derivatives are separate.":"Vertical 9:16 motion master for Shorts and TikTok.";
   });
   $("creator-version-form").addEventListener("submit",async e=>{
     e.preventDefault();if(!state.creatorProject)return;

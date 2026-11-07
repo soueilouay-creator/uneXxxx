@@ -39,9 +39,25 @@ jobs:
         run: python -m compileall -q unexpected_runtime
       - name: Syntax-check command-center JavaScript
         run: node --check web/assets/app.js
-      - name: Validate GitHub Actions workflow YAML
+      - name: Validate GitHub Actions workflow YAML and Bash steps
         run: |
-          ruby -e 'require "yaml"; ARGV.each { |path| YAML.load_file(path); puts "Validated #{path}" }' .github/workflows/*.yml
+          ruby -ryaml -rtempfile -e '
+            ARGV.each do |path|
+              document = YAML.load_file(path)
+              (document["jobs"] || {}).each do |job_name, job|
+                (job["steps"] || []).each_with_index do |step, index|
+                  next unless step["shell"] == "bash" && step["run"].is_a?(String)
+                  valid = Tempfile.create(["workflow-step", ".sh"]) do |file|
+                    file.write(step["run"])
+                    file.flush
+                    system("bash", "-n", file.path)
+                  end
+                  abort "Invalid Bash syntax: #{path}, job #{job_name}, step #{index + 1}" unless valid
+                end
+              end
+              puts "Validated #{path}"
+            end
+          ' .github/workflows/*.yml
       - name: Validate resource and quality scenario contracts
         run: |
           python -m json.tool unexpected_runtime/data/resource_catalog.json >/dev/null

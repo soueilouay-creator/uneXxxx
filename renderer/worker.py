@@ -1,0 +1,67 @@
+#!/usr/bin/env python3
+"""Networkless one-shot renderer. No uneXpected token, DB URL or provider is present."""
+import argparse,hashlib,json,os,shutil,subprocess,sys,tempfile,time
+from pathlib import Path
+ENGINE="5c05490cc55dfb54f8f4c333f0f0e79cb6500564"
+FFMPEG_SOURCE="f893221c8d89cb798b829bebe71d55e1a3f242fd"
+PROFILES={"youtube_shorts":(1080,1920),"tiktok":(1080,1920)}
+def write_json(p,d):
+ p.parent.mkdir(parents=True,exist_ok=True);t=p.with_name(p.name+".tmp");t.write_text(json.dumps(d,sort_keys=True,indent=2),encoding="utf-8");os.replace(t,p)
+def digest(p):
+ h=hashlib.sha256()
+ with p.open("rb") as f:
+  for b in iter(lambda:f.read(1048576),b""):h.update(b)
+ return h.hexdigest()
+def validate(root):
+ m=root/"manifest.json"
+ if m.is_symlink() or not m.is_file():raise ValueError("manifest.json missing.")
+ p=json.loads(m.read_text(encoding="utf-8"))
+ allow={"job_id","engine_commit","project_dir","output_profile","fps","width","height","wall_time_seconds","audio_relpath"}
+ if not isinstance(p,dict) or set(p)-allow or (allow-{"audio_relpath"})-set(p):raise ValueError("Unsupported manifest fields.")
+ if p["engine_commit"]!=ENGINE or p["project_dir"]!="project":raise ValueError("Pinned engine or project path mismatch.")
+ if p["output_profile"] not in PROFILES or (p["width"],p["height"])!=PROFILES[p["output_profile"]]:raise ValueError("Invalid platform profile.")
+ if isinstance(p["fps"],bool) or not isinstance(p["fps"],int) or not 12<=p["fps"]<=60:raise ValueError("Invalid FPS.")
+ if isinstance(p["wall_time_seconds"],bool) or not isinstance(p["wall_time_seconds"],int) or not 30<=p["wall_time_seconds"]<=3600:raise ValueError("Invalid wall-time.")
+ if not isinstance(p["job_id"],str) or not 8<=len(p["job_id"])<=128:raise ValueError("Invalid job ID.")
+ project=root/"project"
+ if project.is_symlink() or not project.is_dir() or not (project/"index.html").is_file():raise ValueError("Project index.html missing.")
+ files=list(project.rglob("*"))
+ if any(x.is_symlink() for x in files) or sum(x.is_file() for x in files)>2000 or sum(x.stat().st_size for x in files if x.is_file())>100*1024*1024:raise ValueError("Project size or file-count limit exceeded.")
+ rel=Path(p.get("audio_relpath","audio/mix.wav"))
+ if rel.is_absolute() or ".." in rel.parts or rel.suffix.lower()!=".wav" or not (project/rel).is_file():raise ValueError("A local WAV soundtrack is required.")
+ return p,project
+def run():
+ ap=argparse.ArgumentParser();ap.add_argument("--input-root",default="/job/input");ap.add_argument("--output-root",default="/job/output");a=ap.parse_args()
+ root,out=Path(a.input_root).resolve(),Path(a.output_root).resolve();engine=Path(os.environ.get("LEMO_OPUSCAR_HOME","/opt/lemo-opuscar")).resolve()
+ out.mkdir(parents=True,exist_ok=True);start=time.monotonic();job="unknown"
+ try:
+  p,source=validate(root);job=p["job_id"]
+  if not (engine/"core/render/video.mjs").is_file():raise RuntimeError("Pinned Opuscar installation is incomplete.")
+  vv=subprocess.run(["ffmpeg","-version"],capture_output=True,text=True,check=True,timeout=5).stdout
+  ffline=next((x for x in vv.splitlines() if x.startswith("ffmpeg version")),"")
+  if not any("version "+str(n)+"." in ffline for n in range(7,20)):raise RuntimeError("FFmpeg 7+ is required.")
+  def progress(stage):
+   d={"status":"running","stage":stage,"engine_commit":ENGINE,"updated_at":time.time()};write_json(out/"progress.json",d);print(json.dumps(d),flush=True)
+  with tempfile.TemporaryDirectory(prefix="creator-render-") as tmp:
+   project=Path(tmp)/"project";shutil.copytree(source,project);audio=project/Path(p.get("audio_relpath","audio/mix.wav"))
+   video,master=out/"picture.mp4",out/"master.mp4";deadline=start+p["wall_time_seconds"]
+   progress("rendering")
+   subprocess.run(["node","core/render/video.mjs",str(project),"--fps",str(p["fps"]),"--workers","2","--size",f'{p["width"]}x{p["height"]}',"--out",str(video)],
+    cwd=engine,check=True,shell=False,timeout=max(1,int(deadline-time.monotonic())),env={**os.environ,"HOME":"/tmp","PLAYWRIGHT_BROWSERS_PATH":"/ms-playwright"})
+   progress("muxing")
+   subprocess.run(["sh","core/render/mux.sh",str(video),str(audio),str(master),str(p["fps"]),"0"],
+    cwd=engine,check=True,shell=False,timeout=max(1,int(deadline-time.monotonic())),env={**os.environ,"HOME":"/tmp"})
+   q=subprocess.run(["ffprobe","-v","error","-show_streams","-show_format","-of","json",str(master)],capture_output=True,text=True,check=True,timeout=15)
+   info=json.loads(q.stdout);ss=info.get("streams",[]);v=next((s for s in ss if s.get("codec_type")=="video"),None);au=next((s for s in ss if s.get("codec_type")=="audio"),None)
+   if not v or not au or (v.get("width"),v.get("height"))!=(p["width"],p["height"]):raise RuntimeError("Encoded MP4 stream/profile verification failed.")
+   if not master.is_file() or master.stat().st_size<4096:raise RuntimeError("MP4 is empty or incomplete.")
+   result={"status":"completed","job_id":job,"engine_commit":ENGINE,"ffmpeg_source_commit":FFMPEG_SOURCE,"ffmpeg_version":ffline,"file":"master.mp4",
+    "byte_size":master.stat().st_size,"sha256":digest(master),"media":{"width":v["width"],"height":v["height"],
+    "duration_seconds":float(info.get("format",{}).get("duration") or 0),"video_codec":v.get("codec_name"),"audio_codec":au.get("codec_name")}}
+   write_json(out/"result.json",result);write_json(out/"progress.json",{"status":"completed","stage":"rendered","engine_commit":ENGINE,"updated_at":time.time()})
+   print(json.dumps(result),flush=True)
+  return 0
+ except Exception as exc:
+  msg=str(exc).splitlines()[0][:240];write_json(out/"failure.json",{"status":"failed","job_id":job,"error_type":type(exc).__name__,"message":msg,"elapsed_seconds":round(time.monotonic()-start,2)})
+  print(json.dumps({"status":"failed","job_id":job,"error_type":type(exc).__name__,"message":msg}),file=sys.stderr,flush=True);return 1
+if __name__=="__main__":raise SystemExit(run())

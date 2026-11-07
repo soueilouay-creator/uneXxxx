@@ -204,3 +204,79 @@ jobs:
 
           echo "Verified existing service ${SERVICE_ID}: canonical repository and main branch are saved; automatic deployment remains off."
           echo "No deployment was requested by this workflow."
+
+      - name: Verify a real OpenRouter call through the hosted runtime
+        shell: bash
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          SERVICE_ID: srv-dbk8217b9u1s73ftauig
+          WORKSPACE_ID: tea-dbh2cpks728c73amdq90
+          SERVICE_URL: https://unexpected-v8-command-center.onrender.com
+        run: |
+          set -euo pipefail
+
+          service_vars="$(curl --silent --show-error --fail-with-body \
+            --connect-timeout 10 --max-time 30 \
+            --url "https://api.render.com/v1/services/${SERVICE_ID}/env-vars?limit=100" \
+            --header "Authorization: Bearer ${RENDER_API_KEY}" \
+            --header "Accept: application/json")"
+
+          runtime_token="$(printf '%s' "${service_vars}" | jq -r \
+            '[.[] | (.envVar // .) | select(.key == "UNEXPECTED_RUNTIME_API_TOKEN") | .value][0] // empty')"
+
+          if [[ -z "${runtime_token}" ]]; then
+            groups="$(curl --silent --show-error --fail-with-body \
+              --connect-timeout 10 --max-time 30 \
+              --url "https://api.render.com/v1/env-groups?ownerId=${WORKSPACE_ID}&limit=100" \
+              --header "Authorization: Bearer ${RENDER_API_KEY}" \
+              --header "Accept: application/json")"
+
+            mapfile -t group_ids < <(printf '%s' "${groups}" | jq -r \
+              --arg service "${SERVICE_ID}" \
+              '.[] | select(any(.serviceLinks[]?; .id == $service)) | [.createdAt, .id] | @tsv' \
+              | sort -r | cut -f2)
+
+            for group_id in "${group_ids[@]}"; do
+              group="$(curl --silent --show-error --fail-with-body \
+                --connect-timeout 10 --max-time 30 \
+                --url "https://api.render.com/v1/env-groups/${group_id}" \
+                --header "Authorization: Bearer ${RENDER_API_KEY}" \
+                --header "Accept: application/json")"
+              candidate="$(printf '%s' "${group}" | jq -r \
+                '[.envVars[]? | select(.key == "UNEXPECTED_RUNTIME_API_TOKEN") | .value][0] // empty')"
+              if [[ -n "${candidate}" ]]; then
+                runtime_token="${candidate}"
+                break
+              fi
+            done
+          fi
+
+          if [[ -z "${runtime_token}" ]]; then
+            echo "::error::UNEXPECTED_RUNTIME_API_TOKEN was not found. No authenticated provider request was made."
+            exit 1
+          fi
+
+          response=""
+          if ! response="$(curl --silent --show-error --fail-with-body \
+            --connect-timeout 10 --max-time 30 \
+            --request POST \
+            --url "${SERVICE_URL}/v1/providers/test" \
+            --header "Authorization: Bearer ${runtime_token}" \
+            --header "Content-Type: application/json" \
+            --header "Accept: application/json" \
+            --data '{"provider_route":"openrouter"}')"; then
+            echo "::error::Hosted OpenRouter test request failed. Sanitized response:"
+            printf '%s' "${response}" | jq -c '{ok, error}' >&2 || true
+            exit 1
+          fi
+
+          if ! printf '%s' "${response}" | jq -e \
+            '.ok == true and .verified == true and .provider_route == "openrouter" and .provider != "deterministic-mock"' >/dev/null; then
+            echo "::error::Hosted runtime did not verify a real OpenRouter provider. Sanitized response:"
+            printf '%s' "${response}" | jq -c '{ok, error, provider_route, provider, model, latency_ms, verified}' >&2 || true
+            exit 1
+          fi
+
+          printf '%s' "${response}" | jq -r \
+            '"OpenRouter verified through hosted runtime: provider=\(.provider), model=\(.model), latency_ms=\(.latency_ms)."'
+          echo "The runtime bearer token and provider key were not printed."

@@ -1,0 +1,227 @@
+name: uneXpected hosted runtime verification
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/hosted-runtime-smoke.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: uneXpected-hosted-runtime-smoke
+  cancel-in-progress: false
+
+jobs:
+  hosted-runtime-smoke:
+    name: Verify deployed v8 runtime and synthetic sales lifecycle
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+      SERVICE_ID: srv-dbk8217b9u1s73ftauig
+      WORKSPACE_ID: tea-dbh2cpks728c73amdq90
+      SERVICE_URL: https://unexpected-v8-command-center.onrender.com
+    steps:
+      - name: Validate Render credential presence
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${RENDER_API_KEY:-}" ]]; then
+            echo "::error::RENDER_API_KEY is missing; no Render or runtime request was made."
+            exit 1
+          fi
+          echo "Render API credential is present; its value is not displayed."
+
+      - name: Resolve runtime bearer token without exposing it
+        id: runtime-auth
+        shell: bash
+        run: |
+          set -euo pipefail
+          service_vars="$(curl --silent --show-error --fail-with-body \
+            --connect-timeout 10 --max-time 30 \
+            --url "https://api.render.com/v1/services/${SERVICE_ID}/env-vars?limit=100" \
+            --header "Authorization: Bearer ${RENDER_API_KEY}" \
+            --header "Accept: application/json")"
+
+          runtime_token="$(printf '%s' "${service_vars}" | jq -r \
+            '[.[] | (.envVar // .) | select(.key == "UNEXPECTED_RUNTIME_API_TOKEN") | .value][0] // empty')"
+
+          if [[ -z "${runtime_token}" ]]; then
+            groups="$(curl --silent --show-error --fail-with-body \
+              --connect-timeout 10 --max-time 30 \
+              --url "https://api.render.com/v1/env-groups?ownerId=${WORKSPACE_ID}&limit=100" \
+              --header "Authorization: Bearer ${RENDER_API_KEY}" \
+              --header "Accept: application/json")"
+
+            group_ids="$(printf '%s' "${groups}" | jq -r --arg service "${SERVICE_ID}" \
+              '.[] | (.envGroup // .) | select(any(.serviceLinks[]?; .id == $service)) | [.createdAt, .id] | @tsv' | sort -r | cut -f2)"
+
+            while IFS= read -r group_id; do
+              [[ -n "${group_id}" ]] || continue
+              group="$(curl --silent --show-error --fail-with-body \
+                --connect-timeout 10 --max-time 30 \
+                --url "https://api.render.com/v1/env-groups/${group_id}" \
+                --header "Authorization: Bearer ${RENDER_API_KEY}" \
+                --header "Accept: application/json")"
+              candidate="$(printf '%s' "${group}" | jq -r \
+                '[.envVars[]? | select(.key == "UNEXPECTED_RUNTIME_API_TOKEN") | .value][0] // empty')"
+              if [[ -n "${candidate}" ]]; then
+                runtime_token="${candidate}"
+                break
+              fi
+            done <<< "${group_ids}"
+          fi
+
+          if [[ -z "${runtime_token}" ]]; then
+            echo "::error::UNEXPECTED_RUNTIME_API_TOKEN was not found; no authenticated runtime request was made."
+            exit 1
+          fi
+
+          echo "::add-mask::${runtime_token}"
+          echo "RUNTIME_TOKEN=${runtime_token}" >> "${GITHUB_ENV}"
+          unset runtime_token service_vars groups candidate
+
+      - name: Check public health and authentication boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          health="$(curl --silent --show-error --fail-with-body \
+            --connect-timeout 10 --max-time 20 \
+            --url "${SERVICE_URL}/health" \
+            --header "Accept: application/json")"
+          printf '%s' "${health}" | jq -e \
+            '.ok == true and .storage == "ready" and .authentication_configured == true' >/dev/null
+          printf '%s' "${health}" | jq -c '{ok, version, storage, provider, provider_configured, authentication_configured}'
+
+          anonymous_code="$(curl --silent --show-error --output "${RUNNER_TEMP}/anonymous.json" \
+            --write-out '%{http_code}' --connect-timeout 10 --max-time 20 \
+            --url "${SERVICE_URL}/v1/status" --header "Accept: application/json")"
+          if [[ "${anonymous_code}" != "401" ]]; then
+            echo "::error::Expected unauthenticated /v1/status to return 401; received ${anonymous_code}."
+            exit 1
+          fi
+          echo "Unauthenticated protected API correctly returned HTTP 401."
+
+          status="$(curl --silent --show-error --fail-with-body \
+            --connect-timeout 10 --max-time 20 \
+            --url "${SERVICE_URL}/v1/status" \
+            --header "Authorization: Bearer ${RUNTIME_TOKEN}" \
+            --header "Accept: application/json")"
+          printf '%s' "${status}" | jq -e \
+            '.health.ok == true and .storage.backend == "postgres" and .storage.healthy == true and .registered_agents == 38' >/dev/null
+          printf '%s' "${status}" | jq -c '{version, registered_agents, storage, health, governance}'
+
+          agents="$(curl --silent --show-error --fail-with-body \
+            --connect-timeout 10 --max-time 20 \
+            --url "${SERVICE_URL}/v1/agents" \
+            --header "Authorization: Bearer ${RUNTIME_TOKEN}" \
+            --header "Accept: application/json")"
+          printf '%s' "${agents}" | jq -e '.count == 38 and (.items | length == 38)' >/dev/null
+          echo "Authenticated agent registry returned 38 roles."
+
+      - name: Verify live OpenRouter provider
+        shell: bash
+        run: |
+          set -euo pipefail
+          provider_response="$(curl --silent --show-error --fail-with-body \
+            --connect-timeout 15 --max-time 120 \
+            --request POST \
+            --url "${SERVICE_URL}/v1/providers/test" \
+            --header "Authorization: Bearer ${RUNTIME_TOKEN}" \
+            --header "Content-Type: application/json" \
+            --header "Accept: application/json" \
+            --data '{"provider_route":"openrouter"}')"
+          printf '%s' "${provider_response}" | jq -e \
+            '.ok == true and .verified == true and .provider_route == "openrouter" and .provider != "deterministic-mock"' >/dev/null
+          printf '%s' "${provider_response}" | jq -c '{provider_route, provider, model, latency_ms, verified}'
+
+      - name: Run synthetic industrial-maintenance sales lifecycle and verify persisted tasks
+        shell: bash
+        run: |
+          set -euo pipefail
+          payload="$(jq -n --arg run "${GITHUB_RUN_ID}" '{
+            agent_id: "sales-intel",
+            objective: "Run a synthetic industrial-maintenance sales workflow for a fictional workshop. Qualify the stated maintenance need, select Starter versus Pro only from the supplied synthetic facts, list remaining discovery questions, prepare a draft-only next-step checklist, and identify evidence required before a verified demo. Do not contact anyone, send or submit anything, book a meeting, issue a real quote, or invent prospect facts.",
+            inputs: {
+              verification_scope: "synthetic release smoke only; not a real prospect or customer",
+              fictional_prospect: {
+                name: "Example Packaging Workshop (fictional)",
+                machine_count: 12,
+                user_count: 2,
+                excel_version: "Microsoft Excel 365",
+                part_sku_count: 35,
+                stated_needs: [
+                  "preventive-maintenance scheduling",
+                  "spare-parts reorder visibility"
+                ],
+                current_process: "unknown",
+                decision_maker: "unknown",
+                contact_details: "not supplied"
+              },
+              constraints: [
+                "Use only the fictional facts provided here.",
+                "Mark unknowns as discovery questions, never as confirmed facts.",
+                "Do not access real inboxes, calendars, customer data or external systems.",
+                "Do not send email, submit forms, call, DM, publish, quote or book anything.",
+                "Treat $79 Starter and $149 Pro as test-price hypotheses, not validated market rates.",
+                "Return the next internal action and the exact evidence needed to advance the pipeline."
+              ],
+              smoke_run_id: $run
+            },
+            provider_route: "openrouter",
+            deadline_seconds: 90,
+            max_corrections: 1,
+            max_improvements: 1
+          }')"
+
+          lifecycle="$(curl --silent --show-error --fail-with-body \
+            --connect-timeout 15 --max-time 300 \
+            --request POST \
+            --url "${SERVICE_URL}/v1/lifecycle" \
+            --header "Authorization: Bearer ${RUNTIME_TOKEN}" \
+            --header "Content-Type: application/json" \
+            --header "Accept: application/json" \
+            --data "${payload}")"
+
+          printf '%s' "${lifecycle}" | jq -e \
+            '.result.status == "delivered" and .result.delivered == true and (.result.workflow_id | type == "string" and length > 0) and (.result.verification_history | length >= 2)' >/dev/null
+
+          workflow_id="$(printf '%s' "${lifecycle}" | jq -r '.result.workflow_id')"
+          task_ids="$(printf '%s' "${lifecycle}" | jq -r \
+            '[.result.plan.task_id, .result.execution.task_id, (.result.verification_history[]?.task_id)] | map(select(type == "string" and length > 0)) | unique[]')"
+          if [[ -z "${task_ids}" ]]; then
+            echo "::error::Lifecycle delivered but returned no persisted stage task IDs."
+            exit 1
+          fi
+
+          checked=0
+          first_task=""
+          while IFS= read -r task_id; do
+            [[ -n "${task_id}" ]] || continue
+            [[ -n "${first_task}" ]] || first_task="${task_id}"
+            task="$(curl --silent --show-error --fail-with-body \
+              --connect-timeout 10 --max-time 20 \
+              --url "${SERVICE_URL}/v1/tasks/${task_id}" \
+              --header "Authorization: Bearer ${RUNTIME_TOKEN}" \
+              --header "Accept: application/json")"
+            printf '%s' "${task}" | jq -e --arg id "${task_id}" \
+              '.task.task_id == $id and .task.result.status == "completed"' >/dev/null
+            checked=$((checked + 1))
+          done <<< "${task_ids}"
+
+          events="$(curl --silent --show-error --fail-with-body \
+            --connect-timeout 10 --max-time 20 \
+            --url "${SERVICE_URL}/v1/tasks/${first_task}/events?after=0" \
+            --header "Authorization: Bearer ${RUNTIME_TOKEN}" \
+            --header "Accept: application/json")"
+          event_count="$(printf '%s' "${events}" | jq -r '.count')"
+          if [[ "${event_count}" -lt 1 ]]; then
+            echo "::error::Lifecycle task exists but its persisted event history is empty."
+            exit 1
+          fi
+
+          printf '%s' "${lifecycle}" | jq -c --argjson task_count "${checked}" --argjson event_count "${event_count}" \
+            '{workflow_id: .result.workflow_id, status: .result.status, delivered: .result.delivered, corrections: .result.corrections, improvements: .result.improvements, verification_history: [.result.verification_history[] | {phase, passed}], persisted_stage_tasks: $task_count, representative_task_events: $event_count}'
+          echo "Synthetic lifecycle passed. No real prospect was contacted, no meeting booked and no quote or external message sent."

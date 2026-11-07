@@ -48,6 +48,15 @@ class CreatorStudioAPITests(unittest.TestCase):
         status,detail=self.request("GET",f"/v1/creator/render-jobs/{job_id}")
         self.assertEqual(status,200);self.assertEqual(detail["job"]["job_id"],job_id)
         self.assertEqual(detail["progress"]["code"],"renderer_unavailable")
+    def test_creator_status_is_authenticated_and_reports_fail_closed_capabilities(self):
+        self.assertEqual(self.request("GET","/v1/creator/status",auth=False)[0],401)
+        status,body=self.request("GET","/v1/creator/status")
+        self.assertEqual(status,200)
+        self.assertEqual(body["engine_commit"],"5c05490cc55dfb54f8f4c333f0f0e79cb6500564")
+        self.assertFalse(body["renderer_configured"])
+        self.assertFalse(body["artifact_storage_configured"])
+        self.assertFalse(body["publishing_enabled"])
+
     def test_unknown_fields_and_non_platform_channels_are_rejected(self):
         payload=self.payload();payload["channel_profile"]["instagram"]={"format":"reels"}
         self.assertEqual(self.request("POST","/v1/creator/projects",payload)[0],400)

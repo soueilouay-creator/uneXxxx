@@ -221,12 +221,14 @@
   async function refresh() {
     $("refresh").disabled=true;
     try {
-      const [status,agents,tasks,events,providers,caps,improvements,approvals,resources,qualityRuns,creatorProjects]=await Promise.all([
+      const [status,agents,tasks,events,providers,caps,improvements,approvals,resources,qualityRuns,creatorProjects,creatorStatus]=await Promise.all([
         api("/v1/status"),api("/v1/agents"),api("/v1/tasks?limit=8"),api("/v1/events?limit=8"),
         api("/v1/providers"),api("/v1/capabilities"),api("/v1/improvements"),api("/v1/approvals"),
-        api("/v1/resources?limit=100"),api("/v1/quality-evaluations?limit=20"),api("/v1/creator/projects?limit=50")
+        api("/v1/resources?limit=100"),api("/v1/quality-evaluations?limit=20"),api("/v1/creator/projects?limit=50"),api("/v1/creator/status")
       ]);
       state.status=status; state.agents=agents.items||[]; state.tasks=tasks.items||[]; state.capabilities=caps.items||[]; state.creatorProjects=creatorProjects.items||[];
+      $("creator-engine-state").textContent=creatorStatus.renderer_configured?"Worker enabled":"Worker blocked";
+      $("creator-render-detail").textContent=creatorStatus.artifact_storage_configured?"Artifact storage configured":"Durable artifact storage not configured";
       $("metric-health").textContent=status.health?.status||"Ready";
       $("health-note").textContent=status.health?.detail||"Runtime status received";
       $("metric-agents").textContent=agents.count??state.agents.length;

@@ -226,6 +226,18 @@ def create_server(*, coordinator=None, api_token=None, host="127.0.0.1", port=0)
                     "governance":{"privileged_actions":"disabled","approval_authority":"not verified","replay_protection":"not verified"},
                     "approval_verifier_configured":bool(getattr(active,"approval_verifier",None))
                 })
+            if path=="/v1/creator/status":
+                from .creator_studio import ENGINE_COMMIT
+                service=getattr(active,"creator_studio",None)
+                dispatcher=getattr(service,"render_dispatcher",None) if service else None
+                enabled=bool(getattr(dispatcher,"enabled",False))
+                return self.send_json(200,{
+                    "engine":"lemo-opuscar","engine_commit":ENGINE_COMMIT,"upstream_license":"MIT",
+                    "renderer_configured":enabled,
+                    "renderer_status":"enabled" if enabled else "blocked",
+                    "artifact_storage_configured":bool(getattr(service,"artifact_store",None)) if service else False,
+                    "publishing_enabled":False
+                })
             if path=="/v1/creator/projects":
                 items=active.creator_studio.list_projects(limit)
                 return self.send_json(200,{"count":len(items),"items":items})

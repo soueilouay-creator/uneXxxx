@@ -44,6 +44,99 @@ jobs:
           fi
           echo "Render API credential is present; its value is not displayed."
 
+      - name: Identify the configured Neon branch without exposing secrets
+        shell: bash
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          SERVICE_ID: srv-dbk8217b9u1s73ftauig
+          WORKSPACE_ID: tea-dbh2cpks728c73amdq90
+        run: |
+          set -euo pipefail
+
+          service_vars="$(curl --silent --show-error --fail-with-body \
+            --connect-timeout 10 --max-time 30 \
+            --url "https://api.render.com/v1/services/${SERVICE_ID}/env-vars?limit=100" \
+            --header "Authorization: Bearer ${RENDER_API_KEY}" \
+            --header "Accept: application/json")"
+
+          database_url="$(printf '%s' "${service_vars}" | jq -r \
+            '[.[] | (.envVar // .) | select(.key == "DATABASE_URL") | .value][0] // empty')"
+
+          if [[ -z "${database_url}" ]]; then
+            groups="$(curl --silent --show-error --fail-with-body \
+              --connect-timeout 10 --max-time 30 \
+              --url "https://api.render.com/v1/env-groups?ownerId=${WORKSPACE_ID}&limit=100" \
+              --header "Authorization: Bearer ${RENDER_API_KEY}" \
+              --header "Accept: application/json")"
+
+            mapfile -t group_ids < <(printf '%s' "${groups}" | jq -r \
+              --arg service "${SERVICE_ID}" \
+              '.[] | select(any(.serviceLinks[]?; .id == $service)) | [.createdAt, .id] | @tsv' \
+              | sort -r | cut -f2)
+
+            for group_id in "${group_ids[@]}"; do
+              group="$(curl --silent --show-error --fail-with-body \
+                --connect-timeout 10 --max-time 30 \
+                --url "https://api.render.com/v1/env-groups/${group_id}" \
+                --header "Authorization: Bearer ${RENDER_API_KEY}" \
+                --header "Accept: application/json")"
+              candidate="$(printf '%s' "${group}" | jq -r \
+                '[.envVars[]? | select(.key == "DATABASE_URL") | .value][0] // empty')"
+              if [[ -n "${candidate}" ]]; then
+                database_url="${candidate}"
+                break
+              fi
+            done
+          fi
+
+          if [[ -z "${database_url}" ]]; then
+            echo "::error::DATABASE_URL was not found on the service or its linked environment groups. No source change was made."
+            exit 1
+          fi
+
+          database_host="$(DATABASE_URL="${database_url}" python - <<'PY'
+          import os
+          from urllib.parse import urlsplit
+
+          parsed = urlsplit(os.environ["DATABASE_URL"])
+          if parsed.scheme not in {"postgres", "postgresql"} or not parsed.hostname:
+              raise SystemExit("DATABASE_URL is not a PostgreSQL URI; value withheld.")
+          host = parsed.hostname
+          if not host.startswith("ep-") or not host.endswith(".c-7.eu-central-1.aws.neon.tech"):
+              raise SystemExit(f"Configured database host is not in the expected Neon project region: {host}")
+          print(host)
+          PY
+          )"
+
+          unset database_url
+          echo "Configured Neon database host: ${database_host}"
+          echo "The connection string and credentials were not printed."
+
+      - name: Confirm current source is the expected legacy or target binding
+        shell: bash
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          SERVICE_ID: srv-dbk8217b9u1s73ftauig
+          LEGACY_REPO: https://github.com/soueilouay-creator/uneXpected-
+          LEGACY_BRANCH: feat/unified-v8-foundation
+          TARGET_REPO: https://github.com/soueilouay-creator/uneXxxx
+          TARGET_BRANCH: main
+        run: |
+          set -euo pipefail
+          current="$(curl --silent --show-error --fail-with-body \
+            --connect-timeout 10 --max-time 30 \
+            --url "https://api.render.com/v1/services/${SERVICE_ID}" \
+            --header "Authorization: Bearer ${RENDER_API_KEY}" \
+            --header "Accept: application/json")"
+          printf '%s' "${current}" | jq -e \
+            --arg id "${SERVICE_ID}" \
+            --arg legacyRepo "${LEGACY_REPO}" \
+            --arg legacyBranch "${LEGACY_BRANCH}" \
+            --arg targetRepo "${TARGET_REPO}" \
+            --arg targetBranch "${TARGET_BRANCH}" \
+            '.id == $id and (((.repo == $legacyRepo) and (.branch == $legacyBranch)) or ((.repo == $targetRepo) and (.branch == $targetBranch))) and .autoDeployTrigger == "off"' >/dev/null
+          echo "Current service identity, source and disabled auto-deploy match the expected cutover preconditions."
+
       - name: Rebind the existing service and verify the saved settings
         shell: bash
         env:

@@ -69,12 +69,10 @@ jobs:
               --header "Authorization: Bearer ${RENDER_API_KEY}" \
               --header "Accept: application/json")"
 
-            mapfile -t group_ids < <(printf '%s' "${groups}" | jq -r \
-              --arg service "${SERVICE_ID}" \
-              '.[] | (.envGroup // .) | select(any(.serviceLinks[]?; .id == $service)) | [.createdAt, .id] | @tsv' \
-              | sort -r | cut -f2)
+            group_ids="$(printf '%s' "${groups}" | jq -r --arg service "${SERVICE_ID}" '.[] | (.envGroup // .) | select(any(.serviceLinks[]?; .id == $service)) | [.createdAt, .id] | @tsv' | sort -r | cut -f2)"
 
-            for group_id in "${group_ids[@]}"; do
+            while IFS= read -r group_id; do
+              [[ -n "${group_id}" ]] || continue
               group="$(curl --silent --show-error --fail-with-body \
                 --connect-timeout 10 --max-time 30 \
                 --url "https://api.render.com/v1/env-groups/${group_id}" \
@@ -86,7 +84,7 @@ jobs:
                 database_url="${candidate}"
                 break
               fi
-            done
+            done <<< "${group_ids}"
           fi
 
           if [[ -z "${database_url}" ]]; then
@@ -231,12 +229,10 @@ jobs:
               --header "Authorization: Bearer ${RENDER_API_KEY}" \
               --header "Accept: application/json")"
 
-            mapfile -t group_ids < <(printf '%s' "${groups}" | jq -r \
-              --arg service "${SERVICE_ID}" \
-              .[] | (.envGroup // .) | select(any(.serviceLinks[]?; .id == $service)) | [.createdAt, .id] | @tsv \
-              | sort -r | cut -f2)
+            group_ids="$(printf '%s' "${groups}" | jq -r --arg service "${SERVICE_ID}" '.[] | (.envGroup // .) | select(any(.serviceLinks[]?; .id == $service)) | [.createdAt, .id] | @tsv' | sort -r | cut -f2)"
 
-            for group_id in "${group_ids[@]}"; do
+            while IFS= read -r group_id; do
+              [[ -n "${group_id}" ]] || continue
               group="$(curl --silent --show-error --fail-with-body \
                 --connect-timeout 10 --max-time 30 \
                 --url "https://api.render.com/v1/env-groups/${group_id}" \
@@ -248,7 +244,7 @@ jobs:
                 runtime_token="${candidate}"
                 break
               fi
-            done
+            done <<< "${group_ids}"
           fi
 
           if [[ -z "${runtime_token}" ]]; then

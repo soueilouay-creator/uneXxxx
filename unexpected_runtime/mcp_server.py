@@ -1,5 +1,6 @@
 from __future__ import annotations
 import json
+import hashlib
 from typing import Any
 from mcp.server import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
@@ -33,13 +34,47 @@ def _live_route(active,route:str|None)->str:
         raise ToolError("MCP execution requires a configured, verified live provider route; mock and unverified routes are blocked.")
     return selected
 def _submit_task(active, request:TaskRequest, runner)->dict[str,Any]:
-    active.enqueue(request)
+    key=request.idempotency_key
+    request_hash=None
+    if key:
+        request_hash=hashlib.sha256(json.dumps({
+            "agent_id":request.agent_id,"objective":request.objective,"inputs":request.inputs,
+            "required_permissions":list(request.required_permissions),"source_refs":list(request.source_refs),
+            "provider_route":request.provider_route,"requested_skill_ids":list(request.requested_skill_ids),
+            "parent_task_id":request.parent_task_id,
+        },sort_keys=True,ensure_ascii=False).encode()).hexdigest()
+        claim=active.store.claim_idempotency(key,request_hash,request.task_id)
+        if claim["state"] in ("completed","failed") and claim.get("result"):
+            active.store.log_event("idempotency_replay",claim["task_id"],request.agent_id,
+                                   {"key_hash":hashlib.sha256(key.encode()).hexdigest()[:12],"state":claim["state"]})
+            return {"task_id":claim["task_id"],"status":claim["state"],"replayed":True,"result":claim["result"]}
+        if claim["state"]=="running" and claim.get("task_id")!=request.task_id:
+            return {"task_id":claim["task_id"],"status":"in_progress","replayed":True}
+        if claim["state"]!="claimed":
+            return {"task_id":claim.get("task_id",request.task_id),"status":"in_progress","replayed":True}
+    try:
+        active.enqueue(request)
+    except Exception:
+        if key:
+            active.store.fail_idempotency(key,request.task_id,{"status":"failed","error":"enqueue_failed"})
+        raise
     def guarded_runner():
         try:
-            runner()
+            output=runner()
+            if key:
+                result=output.to_dict() if callable(getattr(output,"to_dict",None)) else output
+                result=result if isinstance(result,dict) else {"status":"failed","error":"empty_task_result"}
+                success=result.get("status")=="completed" or (result.get("status")=="delivered" and result.get("delivered") is True)
+                if success:
+                    active.store.complete_idempotency(key,request.task_id,result)
+                    active.store.set_idempotent(key,request_hash,result)
+                else:
+                    active.store.fail_idempotency(key,request.task_id,result)
         except Exception as exc:
             failure={"status":"failed","error_type":type(exc).__name__}
             active.store.mark_task(request.task_id,"failed",failure)
+            if key:
+                active.store.fail_idempotency(key,request.task_id,failure)
             active.store.log_event("task_failed",request.task_id,request.agent_id,
                                    {"source":"remote-mcp","error_type":type(exc).__name__})
     try:
@@ -47,6 +82,8 @@ def _submit_task(active, request:TaskRequest, runner)->dict[str,Any]:
     except RuntimeError:
         failure={"status":"failed","error":"runtime_shutting_down"}
         active.store.mark_task(request.task_id,"failed",failure)
+        if key:
+            active.store.fail_idempotency(key,request.task_id,failure)
         active.store.log_event("task_failed",request.task_id,request.agent_id,
                                {"source":"remote-mcp","error_type":"executor_unavailable"})
         raise ToolError("The task was persisted but could not be scheduled because the runtime is shutting down.") from None
@@ -94,10 +131,11 @@ def build_mcp_server(active):
             item=dict(row); item["payload"]=_obj(item.pop("payload_json",None)); items.append(item)
         return {"task_id":task_id,"count":len(items),"items":items,"next_cursor":items[-1]["event_id"] if items else after_event_id,"has_more":len(rows)>bounded}
     @server.tool(description="Submit a bounded internal agent task asynchronously. Returns a persisted task ID immediately; use get_task and get_task_events for progress and result. Requires a verified live provider; no external write tools.",structured_output=True)
-    def run_task(agent_id:str,objective:str,inputs:dict[str,Any]|None=None,provider_route:str|None=None,deadline_seconds:float=60.0,max_steps:int=6)->dict[str,Any]:
+    def run_task(agent_id:str,objective:str,inputs:dict[str,Any]|None=None,provider_route:str|None=None,deadline_seconds:float=60.0,max_steps:int=6,idempotency_key:str|None=None)->dict[str,Any]:
         if not isinstance(agent_id,str) or not agent_id.strip(): raise ToolError("agent_id is required.")
         if not isinstance(objective,str) or not objective.strip() or len(objective)>16000: raise ToolError("Invalid objective.")
         if inputs is not None and not isinstance(inputs,dict): raise ToolError("inputs must be a JSON object.")
+        if idempotency_key is not None and (not isinstance(idempotency_key,str) or not idempotency_key or len(idempotency_key)>128): raise ToolError("Invalid idempotency_key.")
         if isinstance(deadline_seconds,bool) or not isinstance(deadline_seconds,(int,float)) or not 0<float(deadline_seconds)<=MAX_DEADLINE or isinstance(max_steps,bool) or not isinstance(max_steps,int) or not 1<=max_steps<=12:
             raise ToolError("Task deadline or step limit is outside permitted bounds.")
         try: spec=active.registry.get(agent_id)
@@ -105,12 +143,13 @@ def build_mcp_server(active):
         if set(spec.allowed_permissions)&PRIVILEGED: raise ToolError("This role has privileged scopes and cannot be invoked through remote MCP.")
         selected=_live_route(active,provider_route)
         request=TaskRequest.create(agent_id,objective,inputs=inputs or {},deadline_seconds=float(deadline_seconds),
-                                   max_steps=max_steps,provider_route=selected)
+                                   max_steps=max_steps,provider_route=selected,idempotency_key=idempotency_key)
         return _submit_task(active,request,lambda:active._execute_with_deadline(request,CancellationToken()))
     @server.tool(description="Submit an internal draft-only commerce sales workflow asynchronously and return a persisted task ID immediately. Use get_task and get_task_events for progress and result. Never contact customers or perform external actions.",structured_output=True)
-    def run_sales_workflow(objective:str,inputs:dict[str,Any]|None=None,provider_route:str|None=None,deadline_seconds:float=90.0,max_corrections:int=0,max_improvements:int=1)->dict[str,Any]:
+    def run_sales_workflow(objective:str,inputs:dict[str,Any]|None=None,provider_route:str|None=None,deadline_seconds:float=90.0,max_corrections:int=0,max_improvements:int=1,idempotency_key:str|None=None)->dict[str,Any]:
         if not isinstance(objective,str) or not objective.strip() or len(objective)>12000: raise ToolError("Invalid objective.")
         if inputs is not None and not isinstance(inputs,dict): raise ToolError("inputs must be a JSON object.")
+        if idempotency_key is not None and (not isinstance(idempotency_key,str) or not idempotency_key or len(idempotency_key)>128): raise ToolError("Invalid idempotency_key.")
         if isinstance(deadline_seconds,bool) or not isinstance(deadline_seconds,(int,float)) or not 0<float(deadline_seconds)<=MAX_DEADLINE or isinstance(max_corrections,bool) or not isinstance(max_corrections,int) or not 0<=max_corrections<=1 or isinstance(max_improvements,bool) or not isinstance(max_improvements,int) or not 1<=max_improvements<=2:
             raise ToolError("Sales workflow limits are outside permitted bounds.")
         spec=active.registry.get("sales-intel")
@@ -120,7 +159,7 @@ def build_mcp_server(active):
           "never":["email/call/DM/form submission","publishing","meeting booking","quotes/payments","external-system writes"],
           "facts":"Use supplied facts only and label unknowns as discovery questions."}
         request=TaskRequest.create("sales-intel",objective,inputs=safe_inputs,deadline_seconds=float(deadline_seconds),
-                                   max_steps=6,provider_route=selected)
+                                   max_steps=6,provider_route=selected,idempotency_key=idempotency_key)
         def execute_sales_workflow():
             if not active.store.mark_task(request.task_id,"running"):
                 raise RuntimeError("sales workflow task could not be claimed")
@@ -134,6 +173,7 @@ def build_mcp_server(active):
             active.store.mark_task(request.task_id,final_status,result)
             active.store.log_event("task_"+final_status,request.task_id,"sales-intel",
                                    {"workflow_status":result.get("status"),"delivered":bool(result.get("delivered"))})
+            return result
         return _submit_task(active,request,execute_sales_workflow)
     app=server.streamable_http_app(streamable_http_path="/mcp",json_response=True,stateless_http=True,max_request_body_size=64*1024,
       transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=True,

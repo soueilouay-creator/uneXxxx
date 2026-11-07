@@ -42,7 +42,25 @@ jobs:
       - name: Validate GitHub Actions workflow YAML and Bash steps
         run: |
           ruby -ryaml -rtempfile -e '
+            def reject_duplicate_yaml_keys(node, path)
+              case node
+              when Psych::Nodes::Mapping
+                seen = {}
+                node.children.each_slice(2) do |key, value|
+                  key_name = key.respond_to?(:value) ? key.value : key.to_s
+                  abort "Duplicate YAML mapping key #{key_name.inspect} in #{path}" if seen.key?(key_name)
+                  seen[key_name] = true
+                  reject_duplicate_yaml_keys(key, path)
+                  reject_duplicate_yaml_keys(value, path)
+                end
+              when Psych::Nodes::Sequence
+                node.children.each { |child| reject_duplicate_yaml_keys(child, path) }
+              end
+            end
+
             ARGV.each do |path|
+              syntax_tree = YAML.parse_file(path)
+              reject_duplicate_yaml_keys(syntax_tree, path)
               document = YAML.load_file(path)
               (document["jobs"] || {}).each do |job_name, job|
                 (job["steps"] || []).each_with_index do |step, index|

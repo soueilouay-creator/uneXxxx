@@ -125,6 +125,37 @@ class SkillRegistryTests(unittest.TestCase):
         self.assertIsNotNone(registry.resolve('self-improvement-governor', 'Run a benchmark for a self-improvement proposal'))
         self.assertIsNone(registry.resolve('creative-media-studio', 'Create a video'))
 
+    def test_creator_studio_is_the_only_active_media_workflow_and_sales_is_archived(self):
+        manifest = json.loads((ROOT / 'skill_manifest.json').read_text(encoding='utf-8'))
+        active_ids = {item['id'] for item in manifest['skills']}
+        self.assertEqual(active_ids, {'creative-media', 'skill-engineering', 'self-improvement'})
+
+        sales_path = ROOT / 'skills/industrial-maintenance-sales/SKILL.md'
+        self.assertTrue(sales_path.is_file())
+        sales_text = sales_path.read_text(encoding='utf-8')
+        self.assertTrue(sales_text.startswith('# ARCHIVED — NOT ACTIVE (2026-11-07)'))
+        registry = SkillRegistry.load(ROOT / 'skill_manifest.json', ROOT)
+        self.assertIsNone(registry.resolve('sales-intel', 'Research industrial maintenance sales prospects'))
+
+    def test_creator_workflows_route_to_hash_verified_opuscar_reference(self):
+        registry = SkillRegistry.load(ROOT / 'skill_manifest.json', ROOT)
+        objectives = [
+            ('creative-director', 'Develop a YouTube Shorts concept and treatment'),
+            ('media-producer', 'Build a TikTok video storyboard'),
+            ('voice-agent', 'Create a voiceover for a YouTube video'),
+            ('marketing-seo', 'Prepare TikTok video metadata'),
+        ]
+        for role_id, objective in objectives:
+            with self.subTest(role_id=role_id):
+                selected = registry.resolve(role_id, objective)
+                self.assertIsNotNone(selected)
+                self.assertEqual(selected.id, 'creative-media')
+                self.assertEqual(selected.allowed_tools, ())
+                context = registry.read_context(selected)
+                self.assertIn('Lemo Opuscar is a code-based filmmaking engine', context)
+                self.assertIn('5c05490cc55dfb54f8f4c333f0f0e79cb6500564', context)
+                self.assertNotIn('autonomous hosted video model', context)
+
     def test_coordinator_exposes_the_skill_manifest_injection_seam(self):
         self.assertIn('skill_manifest_path', inspect.signature(Coordinator).parameters)
 

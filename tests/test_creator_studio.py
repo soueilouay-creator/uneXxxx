@@ -33,7 +33,6 @@ class CreatorStudioTests(unittest.TestCase):
         self.service = CreatorStudioService(self.store, artifact_store=self.artifacts)
 
     def tearDown(self):
-        self.store.close()
         self.temp.cleanup()
 
     def create_project(self):

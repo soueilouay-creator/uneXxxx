@@ -7,6 +7,9 @@ import unittest
 import tempfile
 import http.client
 import threading
+import socket
+import struct
+import time
 from unittest.mock import patch
 
 from unexpected_runtime.coordinator import Coordinator
@@ -418,6 +421,69 @@ class CoordinatorProviderRoutingTests(unittest.TestCase):
             self.assertNotIn("Bearer " + private_key, json.dumps(payload))
             conn.close()
         finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_client_disconnect_after_provider_success_does_not_record_provider_failure(self):
+        provider_started = threading.Event()
+        finish_provider = threading.Event()
+        provider_thread_identifier = []
+
+        class BlockingProvider(self.TaggedProvider):
+            def generate(self, **kwargs):
+                provider_thread_identifier.append(threading.get_ident())
+                provider_started.set()
+                if not finish_provider.wait(timeout=5):
+                    raise RuntimeError("test provider release timed out")
+                return "provider call completed"
+
+        provider = BlockingProvider("openrouter")
+        self.router.providers["openrouter"] = provider
+        token = "provider-router-disconnect-token-" + "z" * 32
+        server = create_server(coordinator=self.coordinator, api_token=token, host="127.0.0.1", port=0)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        conn = http.client.HTTPConnection("127.0.0.1", server.server_address[1], timeout=8)
+        try:
+            conn.request(
+                "POST",
+                "/v1/providers/test",
+                json.dumps({"provider_route": "openrouter"}),
+                {
+                    "Authorization": "Bearer " + token,
+                    "Content-Type": "application/json",
+                },
+            )
+            self.assertTrue(provider_started.wait(timeout=3), "provider test did not reach the provider")
+            self.assertIsNotNone(conn.sock, "HTTP client socket was not established")
+            conn.sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+            conn.close()
+            finish_provider.set()
+
+            self.assertTrue(provider_thread_identifier, "provider request thread was not captured")
+            provider_thread_id = provider_thread_identifier[0]
+            deadline = time.monotonic() + 3
+            while time.monotonic() < deadline:
+                if not any(item.ident == provider_thread_id for item in threading.enumerate()):
+                    break
+                time.sleep(0.02)
+            self.assertFalse(
+                any(item.ident == provider_thread_id for item in threading.enumerate()),
+                "provider request handler did not finish after the client disconnected",
+            )
+            events = self.coordinator.store.events(200)
+            event_types = [event["event_type"] for event in events]
+            self.assertIn("provider_verified", event_types)
+            self.assertNotIn(
+                "provider_test_failed",
+                event_types,
+                "A disconnected HTTP client must not turn a successful provider call into a failure event.",
+            )
+            self.assertTrue(provider.verified)
+        finally:
+            finish_provider.set()
+            conn.close()
             server.shutdown()
             server.server_close()
             thread.join(timeout=2)

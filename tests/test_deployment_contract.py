@@ -78,7 +78,7 @@ class DeploymentContractTests(unittest.TestCase):
         marker = "- name: Verify a real OpenRouter call through the hosted runtime"
         self.assertIn(marker, workflow)
         provider_step = workflow.split(marker, 1)[1]
-        timeout_match = re.search(r"--max-time\\s+(\\d+)", provider_step)
+        timeout_match = re.search(r"--max-time\s+(\d+)", provider_step)
         self.assertIsNotNone(timeout_match, "Provider preflight must define an explicit curl deadline.")
         self.assertGreaterEqual(
             int(timeout_match.group(1)),

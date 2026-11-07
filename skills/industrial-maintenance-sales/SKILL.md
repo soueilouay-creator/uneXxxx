@@ -1,3 +1,9 @@
+# ARCHIVED — NOT ACTIVE (2026-11-07)
+
+> This Skill is preserved as historical source only. It is removed from active Skill routing and must not be loaded for new work. Existing files, prospect records, workbooks, database tables and backups are intentionally retained.
+
+---
+
 # Industrial Maintenance Sales Workflow
 
 **ID:** `industrial-maintenance-sales`  

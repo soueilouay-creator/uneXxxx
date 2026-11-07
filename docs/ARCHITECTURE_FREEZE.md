@@ -10,6 +10,15 @@
 
 Phone/PWA is out of scope for v8. Remote MCP is not connected in the current runtime. Live provider verification is historically evidenced for OpenRouter on 2026-11-02, but a fresh provider check on 2026-11-06 has not been completed.
 
+## Superseding scope amendment — 2026-11-07
+
+The owner has approved a new active mission: **uneXpected Creator Studio for YouTube and TikTok video production**. This amendment supersedes the previous industrial-maintenance sales workflow as the active business priority. The sales Skill source and all historical workbooks, prospect records, database tables and backups are preserved, but the sales Skill is removed from active Skill routing. No historical business records are deleted or migrated by this scope change.
+
+The Creator Studio keeps the existing Coordinator, authenticated API, canonical 38-role registry, provider router and PostgreSQL task authority. It adds no second coordinator or public control plane. Lemo Opuscar is referenced at pinned upstream commit `5c05490cc55dfb54f8f4c333f0f0e79cb6500564` as a code-based filmmaking toolkit. It is not yet an installed renderer or a hosted video-generation model. Generated film code must run only in a future isolated, non-root, network-disabled, resource-bounded renderer without control-plane secrets.
+
+YouTube and TikTok are the only active publishing destinations. Uploading, scheduling and other public actions remain disabled until account/connector verification and exact owner approval. Paid generation, online voice, optional downloads, paid compute, production deployment and changes to production credentials or databases remain separate approval gates. This scope amendment changes repository workflow routing only; it does not change Render, production databases, provider credentials or platform accounts.
+
+
 ## Decision
 
 Freeze the v8 topology as one Python application, one public HTTP/API boundary, one `Coordinator`, one canonical 38-role registry, one provider router, one authoritative runtime state layer and one desktop-first web command center.
@@ -84,7 +93,7 @@ The owner confirmed use of the Render workspace `My Workspace` (workspace select
 
 The repository includes a deterministic lifecycle proof with a passing fake provider. It covers request, plan, execute, verify, improve/reverify, deliver and learn as local runtime stages. It does not prove a real non-mock model route, real external tool calls or a customer-facing delivery. Those require separate evidence.
 
-## First governed business workflow: industrial-maintenance sales
+## Historical business workflow record (superseded 2026-11-07): industrial-maintenance sales
 
 The first business workflow is the existing industrial-maintenance sales operation, not a generic demo. The latest source ledger is `uneXpected_Sales_Control_Center_v1.10.6.xlsx`, reviewed on 2026-11-06 08:07:24 Africa/Tunis. It records 49 prospects, 44 first touches, zero human replies, zero independently verified demos, zero quotes, zero wins and eight outstanding contact/delivery checks. Treat these values as a dated baseline; reread the workbook and live sources before any operational decision.
 

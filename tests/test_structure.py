@@ -78,12 +78,6 @@ class StructureTests(unittest.TestCase):
    self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(),skill['sha256'],skill['id'])
   self.assertFalse((ROOT/'agents/creative-media-studio.md').exists())
   self.assertFalse((ROOT/'agents/skill-engineering.md').exists())
-  sales=next(s for s in skills if s['id']=='industrial-maintenance-sales')
-  required_roles={'sales-intel','business-strategist','maintenance-engineer','marketing-seo','data-analyst','project-manager','code-reviewer','self-improvement-governor'}
-  self.assertEqual(set(sales['agent_ids']),required_roles)
-  self.assertTrue({'preventive maintenance tracker','spare-parts tracker','sales control center'}.issubset(set(sales['trigger_terms'])))
-  self.assertEqual(sales['invocation_mode'],'automatic')
-  self.assertEqual(sales['allowed_tools'],[])  # no runtime connector is silently authorized by this skill
   freeze=(ROOT/'docs/ARCHITECTURE_FREEZE.md').read_text().lower()
   for token in ('one python application','38-role registry','phone/pwa is out of scope','remote mcp is not connected','live provider verification'):
    self.assertIn(token,freeze)

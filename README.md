@@ -94,11 +94,15 @@ Example authenticated request:
 }
 ```
 
-## First business workflow: industrial-maintenance sales
+## Active creative workflow: YouTube and TikTok Creator Studio
 
-The hash-pinned `industrial-maintenance-sales` Skill maps the existing `sales-intel`, `business-strategist`, `maintenance-engineer`, `marketing-seo`, `data-analyst`, `project-manager`, `code-reviewer` and `self-improvement-governor` roles into one governed sales workflow. It is trigger-matched context, not an extra agent, service, CRM or connector.
+The active `creative-media` Skill routes video briefs, research, hooks, treatments, storyboards, narration, production planning, quality review and platform packaging through the existing canonical roles and Coordinator. It does not create another agent, runtime or database.
 
-The workflow treats the latest Sales Control Center workbook as the source of truth, keeps prospect fit hypotheses separate from confirmed needs, and uses separate stages for draft, approved, sent, delivered, human-replied, demo-booked, quoted, accepted and paid. The $79 Starter and $149 Pro offers remain test-price hypotheses and their scope/exclusions must be rechecked from the current workbook before quoting. No email, form, retry, public post, quote, payment or customer-data action is authorized merely by loading this Skill. See `skills/industrial-maintenance-sales/SKILL.md` and `docs/ARCHITECTURE_FREEZE.md`.
+The pinned [Lemo Opuscar adapter reference](skills/creative-media/references/lemo-opuscar-interface.md) documents upstream commit `5c05490cc55dfb54f8f4c333f0f0e79cb6500564`. Opuscar is a code-based filmmaking toolkit, not a hosted video-generation model; its isolated renderer is a planned integration and is not yet declared available. The current workflow may prepare treatments and packages, but it must report rendering as blocked until the secure renderer is implemented and verified.
+
+YouTube and TikTok are the only active publishing destinations. Packaging does not upload. Publisher adapters remain disabled pending account/scope verification and exact owner approval. Default spend is $0; paid services, online voice, optional assets and chargeable compute require a separate cost/rights preflight and approval.
+
+The former `industrial-maintenance-sales` Skill is preserved at `skills/industrial-maintenance-sales/SKILL.md` as archived historical source and is removed from the active Skill manifest. Existing workbooks, prospect records, database tables and backups are retained unchanged.
 
 ## Governed MCP adapter boundary
 

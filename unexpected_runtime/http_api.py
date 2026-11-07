@@ -347,28 +347,42 @@ def create_server(*, coordinator=None, api_token=None, host="127.0.0.1", port=0)
             if is_provider_test:
                 if set(body)!={"provider_route"} or not isinstance(body.get("provider_route"),str):
                     return self.send_json(400,{"error":"provider_route is required."})
+                provider = None
+                response_status = 200
+                response_body = None
                 try:
                     provider=active.provider.resolve(body["provider_route"]) if hasattr(active.provider,"resolve") else None
                     if provider is None or getattr(provider,"name","")=="deterministic-mock":
-                        return self.send_json(400,{"error":"Mock is test-only and cannot be live-verified."})
-                    started=time.monotonic()
-                    provider.generate(system_prompt="You are performing a bounded provider connectivity check.",
-                                      user_prompt="Reply with exactly: uneXpected provider connection verified.",
-                                      agent_id="system-health",task_id="provider-test",timeout=10.0)
-                    elapsed_ms=round((time.monotonic()-started)*1000,2)
-                    if hasattr(active.provider,"mark_success"): active.provider.mark_success(body["provider_route"])
-                    elif hasattr(provider,"verified"): provider.verified=True
-                    active.store.log_event("provider_verified",payload={"route":body["provider_route"],
-                        "provider":getattr(provider,"name",type(provider).__name__),
-                        "model":getattr(provider,"model",None),"latency_ms":elapsed_ms})
-                    return self.send_json(200,{"ok":True,"provider_route":body["provider_route"],
-                        "provider":getattr(provider,"name",type(provider).__name__),
-                        "model":getattr(provider,"model",None),"latency_ms":elapsed_ms,"verified":True})
+                        response_status = 400
+                        response_body = {"ok":False,"error":"Mock is test-only and cannot be live-verified."}
+                    else:
+                        started=time.monotonic()
+                        provider.generate(system_prompt="You are performing a bounded provider connectivity check.",
+                                          user_prompt="Reply with exactly: uneXpected provider connection verified.",
+                                          agent_id="system-health",task_id="provider-test",timeout=10.0)
+                        elapsed_ms=round((time.monotonic()-started)*1000,2)
+                        if hasattr(active.provider,"mark_success"): active.provider.mark_success(body["provider_route"])
+                        elif hasattr(provider,"verified"): provider.verified=True
+                        active.store.log_event("provider_verified",payload={"route":body["provider_route"],
+                            "provider":getattr(provider,"name",type(provider).__name__),
+                            "model":getattr(provider,"model",None),"latency_ms":elapsed_ms})
+                        response_body = {"ok":True,"provider_route":body["provider_route"],
+                            "provider":getattr(provider,"name",type(provider).__name__),
+                            "model":getattr(provider,"model",None),"latency_ms":elapsed_ms,"verified":True}
                 except Exception as exc:
-                    diagnostic = _safe_provider_diagnostic(locals().get("provider"), exc)
+                    diagnostic = _safe_provider_diagnostic(provider, exc)
                     active.store.log_event("provider_test_failed",payload={"route":body.get("provider_route"),
                         "error_type":type(exc).__name__,"diagnostic":diagnostic})
-                    return self.send_json(502,{"ok":False,"error":diagnostic})
+                    response_status = 502
+                    response_body = {"ok":False,"error":diagnostic}
+
+                # Provider success is established above and audited independently
+                # of the client connection. A dropped response must not relabel
+                # a completed provider call as a provider failure.
+                try:
+                    return self.send_json(response_status,response_body)
+                except OSError:
+                    return
             allowed=({"agent_id","objective","inputs","deadline_seconds","max_corrections","max_improvements","provider_route"}
                      if is_lifecycle else
                      {"agent_id","objective","inputs","deadline_seconds","max_steps","idempotency_key","source_refs","provider_route","skill_ids"})

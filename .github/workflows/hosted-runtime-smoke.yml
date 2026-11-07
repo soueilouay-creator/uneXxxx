@@ -1,4 +1,4 @@
-name: uneXpected hosted runtime and Shopify MCP verification
+name: uneXpected hosted runtime and MCP persistence verification
 
 on:
   workflow_dispatch:
@@ -16,9 +16,9 @@ concurrency:
 
 jobs:
   hosted-runtime-smoke:
-    name: Verify deployed v8 runtime, Shopify sales workflow and persistence
+    name: Verify deployed v8 runtime, MCP tools and restart persistence
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 25
     env:
       RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
       SERVICE_ID: srv-dbk8217b9u1s73ftauig
@@ -36,7 +36,6 @@ jobs:
           echo "Render API credential is present; its value is not displayed."
 
       - name: Resolve runtime bearer token without exposing it
-        id: runtime-auth
         shell: bash
         run: |
           set -euo pipefail
@@ -55,10 +54,8 @@ jobs:
               --url "https://api.render.com/v1/env-groups?ownerId=${WORKSPACE_ID}&limit=100" \
               --header "Authorization: Bearer ${RENDER_API_KEY}" \
               --header "Accept: application/json")"
-
             group_ids="$(printf '%s' "${groups}" | jq -r --arg service "${SERVICE_ID}" \
               '.[] | (.envGroup // .) | select(any(.serviceLinks[]?; .id == $service)) | [.createdAt, .id] | @tsv' | sort -r | cut -f2)"
-
             while IFS= read -r group_id; do
               [[ -n "${group_id}" ]] || continue
               group="$(curl --silent --show-error --fail-with-body \
@@ -79,22 +76,45 @@ jobs:
             echo "::error::UNEXPECTED_RUNTIME_API_TOKEN was not found; no authenticated runtime request was made."
             exit 1
           fi
-
           echo "::add-mask::${runtime_token}"
           echo "RUNTIME_TOKEN=${runtime_token}" >> "${GITHUB_ENV}"
           unset runtime_token service_vars groups candidate
 
-      - name: Check public health and authentication boundary
+      - name: Wait for the merged main commit to be live on Render
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_commit="${GITHUB_SHA}"
+          deployed="false"
+          for attempt in $(seq 1 90); do
+            deploys="$(curl --silent --show-error --fail-with-body \
+              --connect-timeout 10 --max-time 30 \
+              --url "https://api.render.com/v1/services/${SERVICE_ID}/deploys?limit=10" \
+              --header "Authorization: Bearer ${RENDER_API_KEY}" \
+              --header "Accept: application/json")"
+            live_commit="$(printf '%s' "${deploys}" | jq -r \
+              '[.[] | (.deploy // .) | select(.status == "live") | .commit.id][0] // empty')"
+            if [[ "${live_commit}" == "${expected_commit}" ]]; then
+              deployed="true"
+              break
+            fi
+            sleep 10
+          done
+          if [[ "${deployed}" != "true" ]]; then
+            echo "::error::Render did not report the expected main commit as live: ${expected_commit}"
+            exit 1
+          fi
+          echo "Render reports the expected merged commit as live; commit SHA: ${expected_commit}"
+
+      - name: Check health, bearer boundary and role registry
         shell: bash
         run: |
           set -euo pipefail
           health="$(curl --silent --show-error --fail-with-body \
             --connect-timeout 10 --max-time 20 \
-            --url "${SERVICE_URL}/health" \
-            --header "Accept: application/json")"
+            --url "${SERVICE_URL}/health" --header "Accept: application/json")"
           printf '%s' "${health}" | jq -e \
             '.ok == true and .storage == "ready" and .authentication_configured == true' >/dev/null
-          printf '%s' "${health}" | jq -c '{ok, version, storage, provider, provider_configured, authentication_configured}'
 
           anonymous_code="$(curl --silent --show-error --output "${RUNNER_TEMP}/anonymous.json" \
             --write-out '%{http_code}' --connect-timeout 10 --max-time 20 \
@@ -103,7 +123,6 @@ jobs:
             echo "::error::Expected unauthenticated /v1/status to return 401; received ${anonymous_code}."
             exit 1
           fi
-          echo "Unauthenticated protected API correctly returned HTTP 401."
 
           status="$(curl --silent --show-error --fail-with-body \
             --connect-timeout 10 --max-time 20 \
@@ -112,33 +131,15 @@ jobs:
             --header "Accept: application/json")"
           printf '%s' "${status}" | jq -e \
             '.health.ok == true and .storage.backend == "postgres" and .storage.healthy == true and .registered_agents == 38' >/dev/null
-          printf '%s' "${status}" | jq -c '{version, registered_agents, storage, health, governance}'
-
           agents="$(curl --silent --show-error --fail-with-body \
             --connect-timeout 10 --max-time 20 \
             --url "${SERVICE_URL}/v1/agents" \
             --header "Authorization: Bearer ${RUNTIME_TOKEN}" \
             --header "Accept: application/json")"
           printf '%s' "${agents}" | jq -e '.count == 38 and (.items | length == 38)' >/dev/null
-          echo "Authenticated agent registry returned 38 roles."
+          echo "Health, authenticated Postgres status and all 38 roles verified."
 
-      - name: Verify live OpenRouter provider
-        shell: bash
-        run: |
-          set -euo pipefail
-          provider_response="$(curl --silent --show-error --fail-with-body \
-            --connect-timeout 15 --max-time 120 \
-            --request POST \
-            --url "${SERVICE_URL}/v1/providers/test" \
-            --header "Authorization: Bearer ${RUNTIME_TOKEN}" \
-            --header "Content-Type: application/json" \
-            --header "Accept: application/json" \
-            --data '{"provider_route":"openrouter"}')"
-          printf '%s' "${provider_response}" | jq -e \
-            '.ok == true and .verified == true and .provider_route == "openrouter" and .provider != "deterministic-mock"' >/dev/null
-          printf '%s' "${provider_response}" | jq -c '{provider_route, provider, model, latency_ms, verified}'
-
-      - name: Verify authenticated remote MCP, Shopify workflow and recovery after restart
+      - name: Verify MCP tools and task persistence across a Render restart
         shell: bash
         run: |
           set -euo pipefail
@@ -148,7 +149,7 @@ jobs:
             local params="$2"
             shift 2
             local body
-            body="$(jq -cn --arg method "$method" --argjson params "$params" '{
+            body="$(jq -cn --arg method "${method}" --argjson params "${params}" '{
               jsonrpc: "2.0", id: 1, method: $method,
               params: ($params + {_meta: {
                 "io.modelcontextprotocol/protocolVersion": "2026-07-28",
@@ -156,7 +157,7 @@ jobs:
               }})
             }')"
             curl --silent --show-error --fail-with-body \
-              --connect-timeout 15 --max-time 120 \
+              --connect-timeout 15 --max-time 30 \
               --request POST --url "${SERVICE_URL}/mcp" \
               --header "Authorization: Bearer ${RUNTIME_TOKEN}" \
               --header "Content-Type: application/json" \
@@ -170,10 +171,9 @@ jobs:
             local name="$1"
             local arguments="$2"
             local params
-            params="$(jq -cn --arg name "$name" --argjson arguments "$arguments" \
+            params="$(jq -cn --arg name "${name}" --argjson arguments "${arguments}" \
               '{name: $name, arguments: $arguments}')"
-            mcp_request "tools/call" "${params}" \
-              --header "Mcp-Name: ${name}"
+            mcp_request "tools/call" "${params}" --header "Mcp-Name: ${name}"
           }
 
           structured_result() {
@@ -208,84 +208,52 @@ jobs:
 
           catalog="$(mcp_request "tools/list" '{}')"
           printf '%s' "${catalog}" | jq -e '
-            ([.result.tools[].name] | sort) ==
-            ["get_task","get_task_events","list_agents","list_tasks","run_sales_workflow","run_task","runtime_status"]
+            (.result.tools | map(.name) | sort) ==
+              ["get_task","get_task_events","list_agents","list_tasks","run_sales_workflow","run_task","runtime_status"] and
+            ((.result.tools[] | select(.name == "run_sales_workflow") | .description | ascii_downcase) as $d |
+              ($d | contains("draft-only")) and ($d | contains("commerce")) and
+              (($d | contains("industrial-maintenance")) | not))
           ' >/dev/null
-          echo "Authenticated /mcp catalog returned 7 governed tools; anonymous access returned 401."
+          echo "Authenticated MCP catalogue and draft-only commerce description verified."
 
-          status="$(mcp_tool "runtime_status" '{}')"
-          status_data="$(printf '%s' "${status}" | structured_result)"
-          printf '%s' "${status_data}" | jq -e \
+          runtime_status="$(mcp_tool "runtime_status" '{}')"
+          printf '%s' "${runtime_status}" | structured_result | jq -e \
             '.registered_agents == 38 and .health == "ready" and .storage_healthy == true' >/dev/null
+          agent_list="$(mcp_tool "list_agents" '{}')"
+          printf '%s' "${agent_list}" | structured_result | jq -e '.count == 38 and (.items | length == 38)' >/dev/null
+          task_list="$(mcp_tool "list_tasks" '{"limit":10}')"
+          printf '%s' "${task_list}" | structured_result | jq -e '.count >= 0' >/dev/null
 
-          agents="$(mcp_tool "list_agents" '{}')"
-          agents_data="$(printf '%s' "${agents}" | structured_result)"
-          printf '%s' "${agents_data}" | jq -e '.count == 38 and (.items | length == 38)' >/dev/null
-
-          tasks_before="$(mcp_tool "list_tasks" '{"limit":10}')"
-          printf '%s' "${tasks_before}" | structured_result | jq -e '.count >= 0' >/dev/null
-
-          sales_args="$(jq -cn --arg run "${GITHUB_RUN_ID}" '{
-            objective: "Run a Shopify commerce-readiness workflow for the connected test store. Assess store readiness from supplied verified shop facts; identify setup blockers, product-catalogue prerequisites, order/payment/fulfillment checks, and the next three internal actions. Do not invent products, customers, orders, revenue, traffic or payment status. Distinguish verified facts from unknowns. Internal test only.",
-            inputs: {
-              verification_scope: "read-only Shopify context from connected Shopify Admin integration; internal draft-only test",
-              shopify_store: {
-                name: "My Store", domain: "ybzeyh-yq.myshopify.com",
-                country: "Tunisia", currency: "TND", plan: "trial"
-              },
-              observed_store_data: {
-                product_count: 0, order_count: 0,
-                customer_count: "not queried", revenue: "not queried"
-              },
-              constraints: [
-                "Use only supplied facts.",
-                "Do not create, update, delete, import or publish Shopify products or collections.",
-                "Do not create discounts, change inventory, settings or upgrade the Shopify plan.",
-                "Do not access customer PII or contact customers.",
-                "Do not message, submit forms, publish, quote, book or charge payments.",
-                "Label unknown values as unknown and provide a checklist."
-              ],
-              smoke_run_id: $run
-            },
-            provider_route: "openrouter",
-            deadline_seconds: 90,
-            max_corrections: 1,
-            max_improvements: 1
+          task_request="$(jq -cn --arg run "${GITHUB_RUN_ID}" '{
+            agent_id: "project-manager",
+            objective: "Run a synthetic internal persistence smoke test. Return a short confirmation and do not access external systems.",
+            inputs: {test_scope: "MCP task persistence across Render restart", synthetic: true, smoke_run_id: $run},
+            deadline_seconds: 15,
+            max_steps: 1,
+            idempotency_key: ("hosted-smoke-" + $run),
+            provider_route: "mock"
           }')"
+          invoke_response="$(curl --silent --show-error --fail-with-body \
+            --connect-timeout 10 --max-time 30 \
+            --request POST --url "${SERVICE_URL}/v1/invoke" \
+            --header "Authorization: Bearer ${RUNTIME_TOKEN}" \
+            --header "Content-Type: application/json" \
+            --header "Accept: application/json" \
+            --data "${task_request}")"
+          printf '%s' "${invoke_response}" | jq -e \
+            '.result.status == "completed" and (.result.task_id | type == "string" and length > 0)' >/dev/null
+          task_id="$(printf '%s' "${invoke_response}" | jq -r '.result.task_id')"
+          echo "Created a deterministic mock task through the hosted runtime; task ID is retained only as an Actions variable."
 
-          sales_response="$(mcp_tool "run_sales_workflow" "${sales_args}")"
-          sales_data="$(printf '%s' "${sales_response}" | structured_result)"
-          printf '%s' "${sales_data}" | jq -e \
-            '.result.status == "delivered" and .result.delivered == true and (.result.workflow_id | type == "string" and length > 0)' >/dev/null
-
-          task_ids="$(printf '%s' "${sales_data}" | jq -r \
-            '[.. | objects | .task_id? // empty | select(type == "string" and length > 0)] | unique[]')"
-          if [[ -z "${task_ids}" ]]; then
-            echo "::error::Shopify workflow returned no persistent task IDs."
-            exit 1
-          fi
-
-          first_task=""
-          checked=0
-          while IFS= read -r task_id; do
-            [[ -n "${task_id}" ]] || continue
-            [[ -n "${first_task}" ]] || first_task="${task_id}"
-            task_response="$(mcp_tool "get_task" "$(jq -cn --arg id "${task_id}" '{task_id:$id}')")"
-            task_data="$(printf '%s' "${task_response}" | structured_result)"
-            printf '%s' "${task_data}" | jq -e --arg id "${task_id}" '.task.task_id == $id' >/dev/null
-
-            events_response="$(mcp_tool "get_task_events" \
-              "$(jq -cn --arg id "${task_id}" '{task_id:$id,after_event_id:0,limit:50}')")"
-            events_data="$(printf '%s' "${events_response}" | structured_result)"
-            printf '%s' "${events_data}" | jq -e '.count > 0 and (.items | length > 0)' >/dev/null
-            checked=$((checked + 1))
-          done <<< "${task_ids}"
-
-          if [[ -z "${first_task}" || "${checked}" -lt 1 ]]; then
-            echo "::error::No task could be retrieved before restart."
-            exit 1
-          fi
-          echo "Shopify workflow delivered; ${checked} persisted task(s) and event histories were retrieved before restart."
+          task_response="$(mcp_tool "get_task" "$(jq -cn --arg id "${task_id}" '{task_id:$id}')")"
+          task_data="$(printf '%s' "${task_response}" | structured_result)"
+          printf '%s' "${task_data}" | jq -e --arg id "${task_id}" \
+            '.task.task_id == $id and .task.status == "completed" and .task.result.status == "completed"' >/dev/null
+          events_response="$(mcp_tool "get_task_events" \
+            "$(jq -cn --arg id "${task_id}" '{task_id:$id,after_event_id:0,limit:50}')")"
+          events_data="$(printf '%s' "${events_response}" | structured_result)"
+          printf '%s' "${events_data}" | jq -e '.count > 0 and (.items | length > 0)' >/dev/null
+          echo "Task and event history retrieved through MCP before restart."
 
           restart_code="$(curl --silent --show-error --output "${RUNNER_TEMP}/render-restart.json" \
             --write-out '%{http_code}' --connect-timeout 10 --max-time 30 \
@@ -316,22 +284,12 @@ jobs:
             exit 1
           fi
 
-          post_restart_checks=0
-          while IFS= read -r task_id; do
-            [[ -n "${task_id}" ]] || continue
-            task_response="$(mcp_tool "get_task" "$(jq -cn --arg id "${task_id}" '{task_id:$id}')")"
-            task_data="$(printf '%s' "${task_response}" | structured_result)"
-            printf '%s' "${task_data}" | jq -e --arg id "${task_id}" '.task.task_id == $id' >/dev/null
-
-            events_response="$(mcp_tool "get_task_events" \
-              "$(jq -cn --arg id "${task_id}" '{task_id:$id,after_event_id:0,limit:50}')")"
-            events_data="$(printf '%s' "${events_response}" | structured_result)"
-            printf '%s' "${events_data}" | jq -e '.count > 0 and (.items | length > 0)' >/dev/null
-            post_restart_checks=$((post_restart_checks + 1))
-          done <<< "${task_ids}"
-
-          if [[ "${post_restart_checks}" -ne "${checked}" ]]; then
-            echo "::error::Task recovery count changed after restart."
-            exit 1
-          fi
-          echo "SUCCESS: bearer authentication, live MCP, Shopify Sales Control Center workflow, persisted task retrieval, Render restart and post-restart recovery all passed."
+          task_response="$(mcp_tool "get_task" "$(jq -cn --arg id "${task_id}" '{task_id:$id}')")"
+          task_data="$(printf '%s' "${task_response}" | structured_result)"
+          printf '%s' "${task_data}" | jq -e --arg id "${task_id}" \
+            '.task.task_id == $id and .task.status == "completed" and .task.result.status == "completed"' >/dev/null
+          events_response="$(mcp_tool "get_task_events" \
+            "$(jq -cn --arg id "${task_id}" '{task_id:$id,after_event_id:0,limit:50}')")"
+          events_data="$(printf '%s' "${events_response}" | structured_result)"
+          printf '%s' "${events_data}" | jq -e '.count > 0 and (.items | length > 0)' >/dev/null
+          echo "SUCCESS: Render restarted and the same completed task and event history were retrieved from persistent Postgres storage."

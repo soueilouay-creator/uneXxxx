@@ -4,7 +4,10 @@ import http.client
 import json
 import tempfile
 import threading
+import time
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from unexpected_runtime.coordinator import Coordinator
 from unexpected_runtime.http_api import create_server
@@ -112,6 +115,99 @@ class RemoteMCPHTTPTests(unittest.TestCase):
         self.assertNotIn("OPENROUTER_API_KEY", serialized)
         self.assertNotIn("DATABASE_URL", serialized)
 
+    def test_remote_mcp_agent_task_returns_task_id_without_waiting(self):
+        started = threading.Event()
+        release = threading.Event()
+        response_box = []
+
+        def delayed_execution(request, token):
+            started.set()
+            if not release.wait(timeout=4):
+                raise RuntimeError("test release was not signalled")
+            self.coordinator.store.mark_task(request.task_id, "running")
+            self.coordinator.store.mark_task(
+                request.task_id, "completed", {"status": "completed", "output": "synthetic result"}
+            )
+            return {"status": "completed", "output": "synthetic result"}
+
+        self.coordinator._execute_with_deadline = delayed_execution
+        request = {
+            "name": "run_task",
+            "arguments": {
+                "agent_id": "project-manager",
+                "objective": "Prepare a synthetic internal task result.",
+                "inputs": {"synthetic_fixture": True},
+                "provider_route": "synthetic-live",
+                "deadline_seconds": 20,
+                "max_steps": 1,
+                "idempotency_key": "mcp-agent-task-replay-test",
+            },
+        }
+
+        with patch("unexpected_runtime.mcp_server._live_route", return_value="synthetic-live"):
+            client = threading.Thread(
+                target=lambda: response_box.append(self.request_mcp(
+                    "tools/call", request, token=self.token, tool_name="run_task"
+                )),
+                daemon=True,
+            )
+            client.start()
+            try:
+                self.assertTrue(started.wait(timeout=2), "agent task worker did not start")
+                client.join(timeout=1)
+                self.assertFalse(
+                    client.is_alive(),
+                    "MCP run_task must return the persisted task ID without waiting for provider work",
+                )
+                self.assertEqual(len(response_box), 1)
+                status, body = response_box[0]
+                self.assertEqual(status, 200, body)
+                result = body["result"].get("structuredContent")
+                if not isinstance(result, dict):
+                    result = {}
+                    for item in body["result"].get("content", []):
+                        if item.get("type") == "text":
+                            try:
+                                candidate = json.loads(item.get("text", ""))
+                            except (TypeError, ValueError):
+                                continue
+                            if isinstance(candidate, dict):
+                                result = candidate
+                                break
+                task_id = result.get("task_id")
+                self.assertIsInstance(task_id, str)
+                self.assertTrue(task_id)
+
+                replay_status, replay_body = self.request_mcp(
+                    "tools/call", request, token=self.token, tool_name="run_task"
+                )
+                self.assertEqual(replay_status, 200, replay_body)
+                replay = replay_body["result"].get("structuredContent")
+                self.assertEqual(replay["task_id"], task_id)
+                self.assertEqual(replay["status"], "in_progress")
+            finally:
+                release.set()
+                client.join(timeout=3)
+
+        deadline = time.monotonic() + 3
+        row = self.coordinator.store.get_task(task_id)
+        while row and row.get("status") not in {"completed", "failed", "cancelled", "timeout"} and time.monotonic() < deadline:
+            time.sleep(0.01)
+            row = self.coordinator.store.get_task(task_id)
+        self.assertIsNotNone(row)
+        self.assertEqual(row["status"], "completed", row)
+        self.assertEqual(json.loads(row["result_json"])["output"], "synthetic result")
+        with patch("unexpected_runtime.mcp_server._live_route", return_value="synthetic-live"):
+            replay_status, replay_body = self.request_mcp(
+                "tools/call", request, token=self.token, tool_name="run_task"
+            )
+        self.assertEqual(replay_status, 200, replay_body)
+        replay = replay_body["result"].get("structuredContent")
+        self.assertIsInstance(replay, dict, replay_body)
+        self.assertEqual(replay["task_id"], task_id)
+        self.assertEqual(replay["status"], "completed")
+        self.assertTrue(replay["replayed"])
+
     def test_remote_mcp_sales_tool_refuses_unverified_or_mock_provider(self):
         status, body = self.request_mcp(
             "tools/call",
@@ -129,6 +225,120 @@ class RemoteMCPHTTPTests(unittest.TestCase):
         self.assertEqual(status, 200, body)
         self.assertTrue(body["result"].get("isError", False), body)
         self.assertIn("verified live provider", json.dumps(body).lower())
+
+
+    def test_remote_mcp_sales_workflow_returns_task_id_before_work_and_survives_restart(self):
+        started = threading.Event()
+        release = threading.Event()
+        response_box = []
+
+        def delayed_lifecycle(agent_id, objective, inputs, **kwargs):
+            started.set()
+            if not release.wait(timeout=4):
+                raise RuntimeError("test release was not signalled")
+            return SimpleNamespace(to_dict=lambda: {
+                "status": "delivered",
+                "delivered": True,
+                "verified_output": "synthetic workflow result",
+            })
+
+        self.coordinator.run_lifecycle = delayed_lifecycle
+        request = {
+            "name": "run_sales_workflow",
+            "arguments": {
+                "objective": "Prepare a synthetic internal commerce workflow summary.",
+                "inputs": {"synthetic_fixture": True},
+                "provider_route": "synthetic-live",
+            },
+        }
+
+        with patch("unexpected_runtime.mcp_server._live_route", return_value="synthetic-live"):
+            client = threading.Thread(
+                target=lambda: response_box.append(self.request_mcp(
+                    "tools/call", request, token=self.token, tool_name="run_sales_workflow"
+                )),
+                daemon=True,
+            )
+            client.start()
+            try:
+                self.assertTrue(started.wait(timeout=2), "workflow worker did not start")
+                client.join(timeout=1)
+                self.assertFalse(
+                    client.is_alive(),
+                    "MCP must return the persisted task ID without waiting for workflow completion",
+                )
+                self.assertEqual(len(response_box), 1)
+                status, body = response_box[0]
+                self.assertEqual(status, 200, body)
+                result = body["result"].get("structuredContent")
+                if not isinstance(result, dict):
+                    result = {}
+                    for item in body["result"].get("content", []):
+                        if item.get("type") == "text":
+                            try:
+                                candidate = json.loads(item.get("text", ""))
+                            except (TypeError, ValueError):
+                                continue
+                            if isinstance(candidate, dict):
+                                result = candidate
+                                break
+                task_id = result.get("task_id")
+                self.assertIsInstance(task_id, str)
+                self.assertTrue(task_id)
+            finally:
+                release.set()
+                client.join(timeout=3)
+
+        deadline = time.monotonic() + 3
+        row = self.coordinator.store.get_task(task_id)
+        while row and row.get("status") not in {"completed", "failed", "cancelled", "timeout"} and time.monotonic() < deadline:
+            time.sleep(0.01)
+            row = self.coordinator.store.get_task(task_id)
+        self.assertIsNotNone(row)
+        self.assertEqual(row["status"], "completed", row)
+
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=2)
+        self.coordinator.close()
+        self.coordinator = Coordinator(
+            state_dir=self.tmp.name,
+            provider=DeterministicMockProvider(),
+            max_workers=2,
+            max_retries=0,
+        )
+        self.server = create_server(
+            coordinator=self.coordinator,
+            api_token=self.token,
+            host="127.0.0.1",
+            port=0,
+        )
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.host, self.port = self.server.server_address
+
+        status, body = self.request_mcp(
+            "tools/call",
+            {"name": "get_task", "arguments": {"task_id": task_id}},
+            token=self.token,
+            tool_name="get_task",
+        )
+        self.assertEqual(status, 200, body)
+        restored = body["result"].get("structuredContent")
+        if not isinstance(restored, dict):
+            restored = {}
+            for item in body["result"].get("content", []):
+                if item.get("type") == "text":
+                    try:
+                        candidate = json.loads(item.get("text", ""))
+                    except (TypeError, ValueError):
+                        continue
+                    if isinstance(candidate, dict):
+                        restored = candidate
+                        break
+        self.assertEqual(restored["task"]["task_id"], task_id)
+        self.assertEqual(restored["task"]["status"], "completed")
+        self.assertEqual(restored["task"]["result"]["verified_output"], "synthetic workflow result")
 
 
 if __name__ == "__main__":

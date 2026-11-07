@@ -428,9 +428,11 @@ class CoordinatorProviderRoutingTests(unittest.TestCase):
     def test_client_disconnect_after_provider_success_does_not_record_provider_failure(self):
         provider_started = threading.Event()
         finish_provider = threading.Event()
+        provider_thread_identifier = []
 
         class BlockingProvider(self.TaggedProvider):
             def generate(self, **kwargs):
+                provider_thread_identifier.append(threading.get_ident())
                 provider_started.set()
                 if not finish_provider.wait(timeout=5):
                     raise RuntimeError("test provider release timed out")
@@ -459,16 +461,19 @@ class CoordinatorProviderRoutingTests(unittest.TestCase):
             conn.close()
             finish_provider.set()
 
+            self.assertTrue(provider_thread_identifier, "provider request thread was not captured")
+            provider_thread_id = provider_thread_identifier[0]
             deadline = time.monotonic() + 3
-            events = []
-            event_types = []
             while time.monotonic() < deadline:
-                events = self.coordinator.store.events(200)
-                event_types = [event["event_type"] for event in events]
-                if "provider_verified" in event_types:
+                if not any(item.ident == provider_thread_id for item in threading.enumerate()):
                     break
                 time.sleep(0.02)
-
+            self.assertFalse(
+                any(item.ident == provider_thread_id for item in threading.enumerate()),
+                "provider request handler did not finish after the client disconnected",
+            )
+            events = self.coordinator.store.events(200)
+            event_types = [event["event_type"] for event in events]
             self.assertIn("provider_verified", event_types)
             self.assertNotIn(
                 "provider_test_failed",

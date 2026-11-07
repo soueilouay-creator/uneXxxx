@@ -197,11 +197,13 @@ class RemoteMCPHTTPTests(unittest.TestCase):
         self.assertIsNotNone(row)
         self.assertEqual(row["status"], "completed", row)
         self.assertEqual(json.loads(row["result_json"])["output"], "synthetic result")
-        replay_status, replay_body = self.request_mcp(
-            "tools/call", request, token=self.token, tool_name="run_task"
-        )
+        with patch("unexpected_runtime.mcp_server._live_route", return_value="synthetic-live"):
+            replay_status, replay_body = self.request_mcp(
+                "tools/call", request, token=self.token, tool_name="run_task"
+            )
         self.assertEqual(replay_status, 200, replay_body)
         replay = replay_body["result"].get("structuredContent")
+        self.assertIsInstance(replay, dict, replay_body)
         self.assertEqual(replay["task_id"], task_id)
         self.assertEqual(replay["status"], "completed")
         self.assertTrue(replay["replayed"])

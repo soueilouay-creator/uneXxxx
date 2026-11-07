@@ -17,20 +17,28 @@ class CreatorVideoQA:
  def parse_caption_file(path,duration):
   f=Path(path)
   if not f.is_file() or f.stat().st_size>2_000_000: raise CreatorVideoQAError("Caption file is missing or too large.")
-  blocks=re.split(r"\r?\n\s*\r?\n",f.read_text(encoding="utf-8-sig").strip());rx=re.compile(r"(?m)^\s*(?:(\d+)\s*\r?\n)?(\d{2}):(\d{2}):(\d{2})[,.](\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})[,.](\d{3})(?:\s+.*)?\s*$");cues=[]
+  blocks=re.split(r"\r?\n\s*\r?\n",f.read_text(encoding="utf-8-sig").strip())
+  timecode=re.compile(r"^(\d{2}):(\d{2}):(\d{2})[,.](\d{3})\s+-->\s+(\d{2}):(\d{2}):(\d{2})[,.](\d{3})(?:\s+.*)?$")
+  cues=[]
   for block in blocks:
-   if not block.strip() or block.strip().upper()=="WEBVTT": continue
-   m=rx.search(block)
-   if not m: raise CreatorVideoQAError("Subtitle cue has an invalid SRT timecode.")
-   g=[int(x or 0) for x in m.groups()];start=((g[1]*60+g[2])*60+g[3])+g[4]/1000;end=((g[5]*60+g[6])*60+g[7])+g[8]/1000
-   lines=[re.sub(r"<[^>]+>","",x).strip() for x in block[m.end():].strip().splitlines() if x.strip()]
-   if not lines or start<0 or end<=start or end>duration+.25: raise CreatorVideoQAError("Caption cue is empty or outside the video duration.")
-   if len(lines)>2 or any(len(x)>42 for x in lines): raise CreatorVideoQAError("Captions exceed the two-line / 42-character readability target.")
-   cues.append((start,end))
+   rows=[row.strip() for row in block.splitlines() if row.strip()]
+   if not rows or rows[0].upper()=="WEBVTT": continue
+   stamp_index=1 if rows[0].isdigit() else 0
+   if stamp_index>=len(rows): raise CreatorVideoQAError("Subtitle cue has no timecode.")
+   match=timecode.fullmatch(rows[stamp_index])
+   if not match: raise CreatorVideoQAError("Subtitle cue has an invalid SRT timecode.")
+   values=[int(x) for x in match.groups()]
+   cue_start=((values[0]*60+values[1])*60+values[2])+values[3]/1000
+   cue_end=((values[4]*60+values[5])*60+values[6])+values[7]/1000
+   lines=[re.sub(r"<[^>]+>","",row).strip() for row in rows[stamp_index+1:] if row.strip()]
+   if not lines or cue_start<0 or cue_end<=cue_start or cue_end>duration+.25: raise CreatorVideoQAError("Caption cue is empty or outside the video duration.")
+   if len(lines)>2 or any(len(line)>42 for line in lines): raise CreatorVideoQAError("Captions exceed the two-line / 42-character readability target.")
+   cues.append((cue_start,cue_end))
   if not cues: raise CreatorVideoQAError("No subtitle cues were found.")
   cues.sort()
   if any(b[0]<a[1]-.01 for a,b in zip(cues,cues[1:])): raise CreatorVideoQAError("Subtitle cues overlap.")
   return {"status":"passed","cue_count":len(cues),"last_end_seconds":cues[-1][1]}
+
  def _run(self,cmd):
   try: return subprocess.run(cmd,capture_output=True,text=True,timeout=self.timeout,check=False)
   except subprocess.TimeoutExpired as e: raise CreatorVideoQAError("Encoded-media analysis timed out.") from e

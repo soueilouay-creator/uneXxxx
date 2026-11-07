@@ -73,6 +73,19 @@ class DeploymentContractTests(unittest.TestCase):
         for marker in ("mobile/", "mobile-release", "service-worker", "manifest.webmanifest"):
             self.assertNotIn(marker, dockerfile)
 
+    def test_render_provider_preflight_allows_slow_successful_connection_checks(self):
+        workflow = (ROOT / ".github" / "workflows" / "rebind-render-service.yml").read_text(encoding="utf-8")
+        marker = "- name: Verify a real OpenRouter call through the hosted runtime"
+        self.assertIn(marker, workflow)
+        provider_step = workflow.split(marker, 1)[1]
+        timeout_match = re.search(r"--max-time\\s+(\\d+)", provider_step)
+        self.assertIsNotNone(timeout_match, "Provider preflight must define an explicit curl deadline.")
+        self.assertGreaterEqual(
+            int(timeout_match.group(1)),
+            120,
+            "The provider preflight deadline must accommodate successful hosted calls slower than 30 seconds.",
+        )
+
     def test_hosted_postgres_selection_fails_closed_without_dsn(self):
         from unittest.mock import patch
         import tempfile

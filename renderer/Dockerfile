@@ -5,8 +5,9 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git build-essential pkg-config yasm nasm libx264-dev python3 && rm -rf /var/lib/apt/lists/*
 RUN git init /tmp/ffmpeg-src \
  && git -C /tmp/ffmpeg-src remote add origin https://github.com/FFmpeg/FFmpeg.git \
- && git -C /tmp/ffmpeg-src fetch --depth=1 origin f893221c8d89cb798b829bebe71d55e1a3f242fd \
- && git -C /tmp/ffmpeg-src checkout --detach f893221c8d89cb798b829bebe71d55e1a3f242fd \
+ && git -C /tmp/ffmpeg-src fetch --depth=1 origin tag n7.1.5 \
+ && git -C /tmp/ffmpeg-src checkout --detach n7.1.5 \
+ && test "$(git -C /tmp/ffmpeg-src rev-parse HEAD)" = "3a0867c2bfda4a4d4309ca1a8cbdc6175e67f587" \
  && cd /tmp/ffmpeg-src \
  && ./configure --prefix=/opt/ffmpeg --enable-gpl --enable-libx264 --disable-debug --disable-doc --disable-ffplay \
  && make -j2 && make install \

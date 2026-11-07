@@ -2,7 +2,7 @@
 
 Build from the repository root with `docker build -f renderer/Dockerfile -t unexpected-creator-renderer:locked .`.
 
-Pinned toolchain: Lemo-Opuscar `5c05490cc55dfb54f8f4c333f0f0e79cb6500564`; FFmpeg 7.1.2 source commit `f893221c8d89cb798b829bebe71d55e1a3f242fd`; Playwright 1.63.0; Three.js 0.170.0; Node 20; Python 3. The image builds FFmpeg with GPL and libx264 enabled; preserve the upstream licences if redistributing.
+Pinned toolchain: Lemo-Opuscar `5c05490cc55dfb54f8f4c333f0f0e79cb6500564`; FFmpeg 7.1.5 source commit `3a0867c2bfda4a4d4309ca1a8cbdc6175e67f587`; Playwright 1.63.0; Three.js 0.170.0; Node 20; Python 3. The image builds FFmpeg with GPL and libx264 enabled; preserve the upstream licences if redistributing.
 
 Input: a strict `manifest.json` plus original project files under `project/`, including `index.html` and `audio/mix.wav`. The page exposes `window.DUR`, `window.READY` and deterministic `window.render(t)`. Output profiles are 1080×1920 YouTube Shorts and TikTok.
 

@@ -3,7 +3,7 @@ import json, os, re, shutil, subprocess
 from pathlib import Path
 from typing import Any
 ENGINE_COMMIT="5c05490cc55dfb54f8f4c333f0f0e79cb6500564"
-FFMPEG_SOURCE_COMMIT="f893221c8d89cb798b829bebe71d55e1a3f242fd"
+FFMPEG_SOURCE_COMMIT="3a0867c2bfda4a4d4309ca1a8cbdc6175e67f587"
 _IMAGE_RE=re.compile(r"^[a-z0-9][a-z0-9./:_@-]{0,180}$")
 _ALLOWED_LIMITS={"cpu_seconds","memory_mb","wall_time_seconds"}
 class RenderDispatcherUnavailable(RuntimeError): pass

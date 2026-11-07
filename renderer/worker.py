@@ -3,7 +3,7 @@
 import argparse,hashlib,json,os,shutil,subprocess,sys,tempfile,time
 from pathlib import Path
 ENGINE="5c05490cc55dfb54f8f4c333f0f0e79cb6500564"
-FFMPEG_SOURCE="f893221c8d89cb798b829bebe71d55e1a3f242fd"
+FFMPEG_SOURCE="3a0867c2bfda4a4d4309ca1a8cbdc6175e67f587"
 PROFILES={"youtube_shorts":(1080,1920),"tiktok":(1080,1920)}
 def write_json(p,d):
  p.parent.mkdir(parents=True,exist_ok=True);t=p.with_name(p.name+".tmp");t.write_text(json.dumps(d,sort_keys=True,indent=2),encoding="utf-8");os.replace(t,p)

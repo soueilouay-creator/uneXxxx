@@ -21,6 +21,15 @@ class CreatorStudioUIContractTests(unittest.TestCase):
   self.assertIn("creator-render",self.js)
   self.assertIn("creator-job-refresh",self.js)
   self.assertIn(".creator-preview",self.css)
+ def test_longform_story_format_is_primary_and_vertical_is_secondary(self):
+  self.assertIn('id="creator-format"',self.html)
+  self.assertIn("YouTube story film",self.html)
+  self.assertIn("30–45 minutes",self.html)
+  self.assertIn("maxlength=\"100000\"",self.html)
+  self.assertIn('value:"youtube_longform"',self.js)
+  self.assertIn('render_mode:"story_film"',self.js)
+  self.assertIn("creator-format-note",self.js)
+
  def test_no_publish_or_schedule_control_is_added(self):
   self.assertNotIn('id="creator-publish"',self.html)
   self.assertNotIn('id="creator-schedule"',self.html)

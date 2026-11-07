@@ -177,6 +177,12 @@
     state.creatorDetail=detail;state.creatorProject=detail.project;
     const p=detail.project,versions=detail.versions||[],assets=detail.assets||[],jobs=detail.render_jobs||[];
     $("creator-editor-title").textContent=p.title;
+    const longform=p.channel_profile?.youtube?.format==="longform";
+    $("creator-format").value=longform?"youtube_longform":"youtube_shorts";
+    $("creator-format-note").textContent=longform?"Long-form episodes use 1920×1080, illustrated scenes, narration WAV and timed subtitles. Vertical derivatives are separate.":"Vertical 9:16 motion master for Shorts and TikTok.";
+    const latest=versions[versions.length-1]?.content||{};
+    $("creator-hook").value=latest.hook||"";$("creator-script").value=latest.script||"";
+    $("creator-scenes").value=JSON.stringify(latest.scenes||[{scene_id:"scene-01",image:"scenes/scene-01.png",duration_seconds:45,visual_prompt:"Opening visual",narration:"Opening hook",on_screen_text:"A story begins"}],null,2);
     $("creator-project-status").textContent=p.status||"idea";
     $("creator-save-version").disabled=false;
     $("creator-version-state").textContent="Project selected · "+versions.length+" saved versions";
@@ -200,8 +206,8 @@
       $("creator-job-refresh").disabled=true;
     }
     const canExport=Boolean(master&&qa.some(a=>a.qa_status==="passed"));
-    $("creator-youtube-state").textContent=canExport?"QA evidence present; platform package API is not enabled yet.":"Waiting for a verified master and passing QA.";
-    $("creator-tiktok-state").textContent=canExport?"QA evidence present; platform package API is not enabled yet.":"Waiting for a verified master and passing QA.";
+    $("creator-youtube-state").textContent=canExport?"Verified video and QA evidence present; final playback/package retrieval is awaiting durable artifact storage.":"Waiting for a verified 16:9 master, thumbnail and passing QA.";
+    $("creator-tiktok-state").textContent=canExport?"A vertical derivative still needs its own render and QA.":"Prepared separately after the YouTube story master is accepted.";
     $("creator-render").disabled=versions.length===0;
     renderCreatorProjects();
   }
@@ -302,7 +308,7 @@
     e.preventDefault();const button=$("creator-create");button.disabled=true;
     $("creator-create-result").textContent="Saving project…";
     const payload={title:$("creator-title").value.trim(),topic:$("creator-topic").value.trim(),language:$("creator-language").value.trim(),
-      channel_profile:{youtube:{format:"shorts",aspect_ratio:"9:16"},tiktok:{format:"vertical",aspect_ratio:"9:16"}}};
+      channel_profile:$("creator-format").value==="youtube_longform"?{youtube:{format:"longform",aspect_ratio:"16:9",duration_min_seconds:1800,duration_max_seconds:2700}}:{youtube:{format:"shorts",aspect_ratio:"9:16"},tiktok:{format:"vertical",aspect_ratio:"9:16"}}};
     try {
       const result=await api("/v1/creator/projects",{method:"POST",body:JSON.stringify(payload)});
       $("creator-create-result").textContent="Project saved · "+result.project.project_id;
@@ -315,7 +321,7 @@
     const button=$("creator-save-version");button.disabled=true;
     try {
       let scenes;try{scenes=JSON.parse($("creator-scenes").value);}catch(_){throw new Error("Scenes must be valid JSON.");}
-      if(!Array.isArray(scenes)||scenes.length>80)throw new Error("Scenes must be a JSON array with at most 80 entries.");
+      if(!Array.isArray(scenes)||scenes.length>120)throw new Error("Scenes must be a JSON array with at most 120 entries.");
       const content={hook:$("creator-hook").value.trim(),script:$("creator-script").value,scenes};
       const result=await api("/v1/creator/projects/"+encodeURIComponent(state.creatorProject.project_id)+"/versions",
         {method:"POST",body:JSON.stringify({kind:"treatment",content,parent_version_id:state.creatorDetail?.versions?.at(-1)?.version_id||null})});
@@ -328,8 +334,9 @@
     if(!state.creatorProject||!state.creatorDetail?.versions?.length)return;
     const button=$("creator-render");button.disabled=true;$("creator-render-result").textContent="Persisting render request…";
     const latest=state.creatorDetail.versions[state.creatorDetail.versions.length-1];
+    const longform=state.creatorProject.channel_profile?.youtube?.format==="longform";
     const payload={version_id:latest.version_id,style_id:$("creator-style").value,idempotency_key:"render-"+latest.version_id,
-      resource_limits:{cpu_seconds:240,memory_mb:2048,wall_time_seconds:900},request:{profile:"youtube_shorts",targets:["youtube","tiktok"]}};
+      resource_limits:longform?{cpu_seconds:600,memory_mb:4096,wall_time_seconds:3600}:{cpu_seconds:240,memory_mb:2048,wall_time_seconds:900},request:longform?{profile:"youtube_longform",render_mode:"story_film",targets:["youtube"],fps:24}:{profile:"youtube_shorts",render_mode:"opuscar",targets:["youtube","tiktok"]}};
     try {
       const result=await api("/v1/creator/projects/"+encodeURIComponent(state.creatorProject.project_id)+"/render-jobs",
         {method:"POST",body:JSON.stringify(payload)});

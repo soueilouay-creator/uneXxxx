@@ -14,12 +14,16 @@ def validate_render_bundle(input_dir:str|Path)->dict[str,Any]:
  m=root/"manifest.json"
  if m.is_symlink() or not m.is_file():raise ValueError("A regular manifest.json is required.")
  p=json.loads(m.read_text(encoding="utf-8"))
- allowed={"job_id","engine_commit","project_dir","output_profile","fps","width","height","wall_time_seconds","audio_relpath"}
- required=allowed-{"audio_relpath"}
+ allowed={"job_id","engine_commit","project_dir","output_profile","fps","width","height","wall_time_seconds","audio_relpath","render_mode","timeline_relpath","captions_relpath"}
+ required=allowed-{"audio_relpath","render_mode","timeline_relpath","captions_relpath"}
  if not isinstance(p,dict) or required-set(p) or set(p)-allowed:raise ValueError("Render manifest has missing or unsupported fields.")
  if p["engine_commit"]!=ENGINE_COMMIT:raise ValueError("Render manifest must use pinned Opuscar.")
- if p["project_dir"]!="project" or p["output_profile"] not in {"youtube_shorts","tiktok"}:raise ValueError("Only fixed project directory and supported profiles are accepted.")
- if (p["width"],p["height"])!=(1080,1920):raise ValueError("Platform output must be 1080x1920.")
+ if p["project_dir"]!="project":raise ValueError("Only the fixed project directory is accepted.")
+ mode=p.get("render_mode","opuscar")
+ profiles={"youtube_shorts":(1080,1920),"tiktok":(1080,1920),"youtube_longform":(1920,1080)}
+ if mode not in {"opuscar","story_film"} or p["output_profile"] not in profiles:raise ValueError("Unsupported renderer mode or output profile.")
+ if (p["width"],p["height"])!=profiles[p["output_profile"]]:raise ValueError("Render dimensions do not match the selected profile.")
+ if (mode=="story_film")!=(p["output_profile"]=="youtube_longform"):raise ValueError("Story-film mode is reserved for YouTube long-form.")
  if isinstance(p["fps"],bool) or not isinstance(p["fps"],int) or not 12<=p["fps"]<=60:raise ValueError("FPS must be 12–60.")
  wall=p["wall_time_seconds"]
  if isinstance(wall,bool) or not isinstance(wall,int) or not 30<=wall<=3600:raise ValueError("Wall time must be 30–3600 seconds.")
@@ -27,7 +31,8 @@ def validate_render_bundle(input_dir:str|Path)->dict[str,Any]:
  ar=p.get("audio_relpath","audio/mix.wav");rel=Path(ar)
  if not isinstance(ar,str) or rel.is_absolute() or ".." in rel.parts or rel.suffix.lower()!=".wav":raise ValueError("Audio must be a relative WAV file inside project.")
  project=root/"project"
- if project.is_symlink() or not project.is_dir() or not (project/"index.html").is_file():raise ValueError("input/project/index.html is required.")
+ if project.is_symlink() or not project.is_dir():raise ValueError("input/project is required.")
+ if mode=="opuscar" and not (project/"index.html").is_file():raise ValueError("Opuscar input/project/index.html is required.")
  count=size=0
  for f in project.rglob("*"):
   if f.is_symlink():raise ValueError("Project symlinks are not allowed.")
@@ -35,6 +40,9 @@ def validate_render_bundle(input_dir:str|Path)->dict[str,Any]:
    count+=1;size+=f.stat().st_size
    if count>2000 or size>100*1024*1024:raise ValueError("Project exceeds 2,000 files or 100 MiB.")
  if (project/rel).is_symlink() or not (project/rel).is_file():raise ValueError("Project audio/mix.wav is required.")
+ if mode=="story_film":
+  from renderer.story_film import validate_story_paths
+  validate_story_paths(project,p.get("timeline_relpath","timeline.json"),p.get("captions_relpath","captions.srt"))
  return p
 def _inside(child:Path,parent:Path)->bool:
  try:child.relative_to(parent);return True

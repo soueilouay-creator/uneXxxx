@@ -87,7 +87,7 @@
 <div class="heading"><div><p class="eyebrow">MCP & CONNECTOR BOUNDARY</p><h3>Registered tools</h3><p>Only reviewed, installed and provenance-verified adapters are callable.</p></div></div><div id="mcp-tool-grid" class="tool-grid"><div class="empty">Loading registered tool adapters…</div></div>
 <div class="heading"><div><p class="eyebrow">CAPABILITY REGISTRY</p><h3>Capability status</h3></div></div><article class="panel"><div id="skills-capability-list" class="list">Loading capability status…</div></article>
 </section><section class="view" id="view-creator">
-<div class="heading"><div><p class="eyebrow">YOUTUBE + TIKTOK PRODUCTION</p><h3>Creator Studio</h3><p>Create a project, write the script, plan scenes, request an isolated render, and inspect verified outputs.</p></div><span class="state ok">Opuscar pinned</span></div>
+<div class="heading"><div><p class="eyebrow">ORIGINAL STORY FILMS + SHORT DERIVATIVES</p><h3>Creator Studio</h3><p>Build original narrated fantasy-romance stories for YouTube long-form, then prepare vertical short-form derivatives.</p></div><span class="state ok">Opuscar pinned</span></div>
 <div class="metrics creator-metrics">
 <article><label>PROJECTS</label><strong id="creator-project-count">0</strong><small>Persisted in the uneXpected state store</small></article>
 <article><label>RENDER ENGINE</label><strong>Opuscar</strong><small>Commit 5c05490c · MIT</small></article>
@@ -102,7 +102,7 @@
 <label for="creator-title">Project title</label><input id="creator-title" maxlength="180" required placeholder="A story worth watching">
 <label for="creator-topic">Topic / brief</label><textarea id="creator-topic" rows="3" maxlength="600" required placeholder="What is this video about?"></textarea>
 <label for="creator-language">Language</label><input id="creator-language" maxlength="48" value="English" required>
-<p class="muted">The project is prepared for both YouTube Shorts and TikTok (vertical 9:16).</p>
+<label for="creator-format">Primary video format</label><select id="creator-format"><option value="youtube_longform">YouTube story film · 16:9 · 30–45 minutes</option><option value="youtube_shorts">YouTube Shorts + TikTok · 9:16</option></select><p class="muted" id="creator-format-note">Long-form episodes use 1920×1080, illustrated scenes, narration WAV and timed subtitles. Vertical derivatives are prepared separately.</p>
 <button class="button primary" id="creator-create" type="submit">Create project</button>
 <div class="creator-result" id="creator-create-result" role="status"></div>
 </form>
@@ -117,10 +117,10 @@
 <div class="heading"><div><p class="eyebrow">SCRIPT + STORYBOARD</p><h3 id="creator-editor-title">Select a project</h3></div><span class="state" id="creator-project-status">No project</span></div>
 <form id="creator-version-form" class="creator-form">
 <label for="creator-hook">Opening hook</label><input id="creator-hook" maxlength="500" placeholder="The first seconds must earn attention">
-<label for="creator-script">Narration / script</label><textarea id="creator-script" rows="7" maxlength="16000" placeholder="Write the complete narration here…"></textarea>
-<label for="creator-scenes">Scenes (JSON array)</label><textarea id="creator-scenes" rows="6" spellcheck="false">[
-  {"id":"scene-01","duration_seconds":5,"visual":"Opening visual","narration":"Opening hook","on_screen_text":"Watch this"}
-]</textarea>
+<label for="creator-script">Narration / script</label><textarea id="creator-script" rows="7" maxlength="100000" placeholder="Write the complete original narration here (approximately 4,000–6,700 words for 30–45 minutes)…"></textarea>
+<label for="creator-scenes">Scene timeline (JSON array · max 120)</label><textarea id="creator-scenes" rows="8" spellcheck="false">[
+  {"scene_id":"scene-01","image":"scenes/scene-01.png","duration_seconds":45,"visual_prompt":"A moonlit stone castle above a mist-covered forest","narration":"The night the pact was broken, the wolves fell silent.","on_screen_text":"A vow older than the kingdom"}
+]</textarea><p class="muted">For a long-form render, the project bundle must also contain each referenced image, audio/mix.wav and captions.srt. Generated assets are not assumed to exist until uploaded and verified.</p>
 <div class="button-row"><button class="button primary" id="creator-save-version" type="submit" disabled>Save script + scenes</button><span id="creator-version-state" class="muted">Select a project first.</span></div>
 </form>
 <div class="creator-subsection"><div class="heading"><div><p class="eyebrow">VERSION HISTORY</p><h4>Saved versions</h4></div></div><div id="creator-versions" class="list"><div class="empty">No project selected.</div></div></div>
@@ -128,7 +128,7 @@
 <article class="panel">
 <div class="heading"><div><p class="eyebrow">GENERATION</p><h3>Render request</h3></div><span class="state" id="creator-engine-state">Not connected</span></div>
 <div class="creator-form">
-<label for="creator-style">Opuscar style</label>
+<label for="creator-style">Opuscar motion style · short-form only</label>
 <select id="creator-style">
 <option value="whiteboard">Whiteboard</option><option value="papercut-red">Papercut red</option><option value="kino-montage">Kino montage</option><option value="blueprint">Blueprint</option><option value="risograph">Risograph</option><option value="woodcut">Woodcut</option><option value="silkscreen-poster">Silkscreen poster</option>
 </select>
@@ -146,8 +146,8 @@
 <div class="creator-subsection">
 <h4>Platform packages</h4>
 <div class="creator-export-grid">
-<div class="creator-export-card"><b>YouTube Shorts</b><p id="creator-youtube-state">Waiting for a verified master and passing QA.</p><button type="button" class="button secondary" disabled>Prepare YouTube package</button></div>
-<div class="creator-export-card"><b>TikTok</b><p id="creator-tiktok-state">Waiting for a verified master and passing QA.</p><button type="button" class="button secondary" disabled>Prepare TikTok package</button></div>
+<div class="creator-export-card"><b>YouTube Long-form</b><p id="creator-youtube-state">Waiting for a verified 16:9 master, thumbnail and passing QA.</p><button type="button" class="button secondary" disabled>Prepare YouTube package</button></div>
+<div class="creator-export-card"><b>Shorts / TikTok derivatives</b><p id="creator-tiktok-state">Prepared separately from an approved long-form story master.</p><button type="button" class="button secondary" disabled>Prepare TikTok package</button></div>
 </div>
 <p class="muted">Export controls stay locked until the artifact, QA result and platform package are connected to verified storage. No upload or public publishing is enabled here.</p>
 </div>

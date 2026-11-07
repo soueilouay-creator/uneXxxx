@@ -119,10 +119,18 @@ class CreatorStudioService:
         if not isinstance(key,str) or not 8<=len(key)<=128 or not re.fullmatch(r"[A-Za-z0-9._:-]+",key): raise CreatorStudioError("Render idempotency key must be 8 to 128 safe characters.")
         request=job.get("request",{})
         if not isinstance(request,dict): raise CreatorStudioError("Render request must be an object.")
-        self._json(request,256_000); raw=job.get("resource_limits",{})
+        self._json(request,256_000)
+        mode=request.get("render_mode","opuscar"); profile=request.get("profile")
+        if mode not in {"opuscar","story_film"}: raise CreatorStudioError("Unsupported renderer mode.")
+        if mode=="story_film":
+            yt=project.get("channel_profile",{}).get("youtube",{})
+            if profile!="youtube_longform" or yt.get("format")!="longform" or yt.get("aspect_ratio")!="16:9":
+                raise CreatorStudioError("Story-film renders require a YouTube long-form 16:9 project.")
+        elif profile not in {None,"youtube_shorts","tiktok"}: raise CreatorStudioError("Unsupported short-form render profile.")
+        raw=job.get("resource_limits",{})
         if not isinstance(raw,dict) or set(raw)-{"cpu_seconds","memory_mb","wall_time_seconds"}: raise CreatorStudioError("Unsupported render resource limit.")
         limits={"cpu_seconds":raw.get("cpu_seconds",60),"memory_mb":raw.get("memory_mb",512),"wall_time_seconds":raw.get("wall_time_seconds",90)}
-        for field,low,high in (("cpu_seconds",1,600),("memory_mb",256,4096),("wall_time_seconds",1,1800)):
+        for field,low,high in (("cpu_seconds",1,600),("memory_mb",256,4096),("wall_time_seconds",1,3600 if mode=="story_film" else 1800)):
             value=limits[field]
             if isinstance(value,bool) or not isinstance(value,int) or not low<=value<=high: raise CreatorStudioError(f"Render {field} is outside the permitted range.")
         canonical={"project_id":project["project_id"],"version_id":version,"engine_commit":ENGINE_COMMIT,"style_id":style,"request":request,"resource_limits":limits}

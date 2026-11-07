@@ -101,6 +101,25 @@ class RenderJobContractTests(unittest.TestCase):
                 limits={"cpu_seconds": 601, "memory_mb": 512, "wall_time_seconds": 90},
             )
 
+    def test_story_film_bundle_accepts_landscape_and_validated_timeline(self):
+        (self.project / "index.html").unlink()
+        (self.project / "scenes").mkdir()
+        (self.project / "scenes" / "one.png").write_bytes(b"one")
+        (self.project / "scenes" / "two.png").write_bytes(b"two")
+        (self.project / "captions.srt").write_text(
+            "1\n00:00:00,000 --> 00:00:04,000\nA vow.\n", encoding="utf-8"
+        )
+        (self.project / "timeline.json").write_text(json.dumps({"version": 1, "scenes": [
+            {"image": "scenes/one.png", "duration_seconds": 4},
+            {"image": "scenes/two.png", "duration_seconds": 4}
+        ]}), encoding="utf-8")
+        manifest = {**self.manifest, "output_profile": "youtube_longform",
+                    "width": 1920, "height": 1080, "render_mode": "story_film"}
+        (self.input / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+        checked = validate_render_bundle(self.input)
+        self.assertEqual(checked["render_mode"], "story_film")
+        self.assertEqual(checked["output_profile"], "youtube_longform")
+
     def test_ffmpeg_version_detection_combines_stdout_and_stderr(self):
         # FFmpeg reports its version banner on stderr in some builds.
         stdout = ""

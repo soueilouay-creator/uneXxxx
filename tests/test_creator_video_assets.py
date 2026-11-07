@@ -13,6 +13,17 @@ class CreatorMediaTests(unittest.TestCase):
    self.assertEqual(CreatorVideoQA.parse_caption_file(f,5)["cue_count"],2)
    f.write_text("1\n00:00:00,000 --> 00:00:03,000\nFirst.\n\n2\n00:00:02,500 --> 00:00:04,000\nOverlap.\n")
    with self.assertRaises(CreatorVideoQAError):CreatorVideoQA.parse_caption_file(f,5)
+ def test_youtube_longform_package_requires_landscape_and_30_to_45_minutes(self):
+  p={"title":"The Moonbound Vow","topic":"Original paranormal romance fantasy story","language":"English"}
+  a={"mime_type":"video/mp4","sha256":"c"*64}
+  q={"status":"passed","sha256":"d"*64,"media":{"width":1920,"height":1080,"aspect_ratio":"16:9","duration_seconds":2400}}
+  package=CreatorPlatformPackager().build_youtube_longform(p,a,q)
+  self.assertEqual(package["platform"],"youtube")
+  self.assertEqual(package["video"]["aspect_ratio"],"16:9")
+  self.assertFalse(package["uploads_enabled"])
+  with self.assertRaises(CreatorPlatformPackageError):
+   CreatorPlatformPackager().build_youtube_longform(p,a,{**q,"media":{**q["media"],"duration_seconds":1200}})
+
  def test_packages_require_qa_and_never_enable_upload(self):
   p={"title":"Original Film","topic":"How code creates motion","language":"English"};a={"mime_type":"video/mp4","sha256":"a"*64};q={"status":"passed","sha256":"b"*64,"media":{"width":1080,"height":1920,"duration_seconds":10}}
   x=CreatorPlatformPackager().build_both(p,a,q)

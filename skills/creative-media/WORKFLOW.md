@@ -57,3 +57,21 @@ A project may be called technically complete only when its brief, research ledge
 `idea` → `researching` → `treatment_ready` → `storyboard_ready` → `authoring` → `render_queued` → `rendering` → `qa_failed` or `qa_passed` → `human_approved` → `package_ready` → `uploaded` → `scheduled` or `published`.
 
 A skipped storyboard is allowed only when the project records why it is unnecessary. A local export is not an upload; upload acceptance is not proof of publication. Each external state needs provider evidence.
+
+
+## Long-form illustrated romance and fantasy stories
+
+When the brief is a narrated fiction film in the style of a long-form story channel, make the primary master a YouTube 16:9 landscape film, 30–45 minutes. This is a genre and format reference only: create original plots, names, dialogue, character designs, settings, titles, thumbnails and music. Do not reproduce another channel's scripts, episode plots, images, title wording, logo or visual assets.
+
+- Story design: create a compelling 10–20 second cold open, a clear romantic/emotional promise, then a five-act arc: inciting bond or secret; attraction and resistance; escalating danger; betrayal/revelation; choice, sacrifice and a satisfying resolution or clearly signposted next-episode hook.
+- Length and pacing: target about 4,200–6,750 narration words for 30–45 minutes at 140–150 words per minute. Estimate timing from the actual approved narration recording, not word count alone. Allow pauses for emotional beats; do not pad with repeated lines.
+- Continuity: create a story bible for protagonist, love interest, antagonist, supporting cast, relationships, appearance, clothing, voice, powers, setting rules, timeline and unresolved promises. Keep descriptions stable across every scene and later episode.
+- Visual plan: prepare 50–120 numbered scene beats, each with an image path, visual prompt, narration range, on-screen text, mood, camera/animation direction and duration. Use original scene illustrations, not copied creator thumbnails or scraped images. Preserve faces, costumes, hair and locations in a reference sheet.
+- Sound: narration is the lead; use only a voice route whose price, availability and commercial rights have been checked. Maintain consistent loudness, intelligibility, natural pauses and music ducking. Keep dialogue/caption timing aligned to the final encoded master.
+- Thumbnail and title: prepare a distinct 1280×720 landscape thumbnail with a clear focal character relationship, cinematic contrast and a short legible hook. Avoid false promises, copied title formulas and text too small for mobile.
+- Render target: long-form uses the youtube_longform profile and story_film mode, 1920×1080, with timeline.json, original scene images, audio/mix.wav and captions.srt. Illustrated-story QA may treat deliberate still holds as human-review-required; black frames, audio quality, subtitle timing and actual stream properties are still checked.
+- Derivatives: produce separate 9:16 vertical cuts for YouTube Shorts and TikTok only after the long-form story has passed QA. Choose self-contained hooks and complete story moments; reframe/recompose rather than simply crop subtitles or faces.
+- No false completion: a timeline is not a finished film. The final master, thumbnail, narration, subtitles, QA report, rights record and durable downloadable asset must all be verified before calling the project complete.
+
+The deterministic story-film compositor combines supplied, validated still images, narration and captions. It is not an AI story writer, image model or text-to-speech model. If a verified free/local generation route and required storage are unavailable, keep the project at treatment/storyboard stage and report the missing asset/provider instead of manufacturing placeholder deliverables.
+

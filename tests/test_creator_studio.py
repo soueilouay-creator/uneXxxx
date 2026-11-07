@@ -119,6 +119,28 @@ class CreatorStudioTests(unittest.TestCase):
         self.assertEqual(stored["sha256"], digest)
         self.assertEqual(self.artifacts.objects[asset["storage_key"]], content)
 
+    def test_story_film_requires_longform_project_and_allows_hour_wall_limit(self):
+        project = self.service.create_project({
+            "title": "The Moonbound Vow",
+            "topic": "An original paranormal romance fantasy",
+            "language": "English",
+            "channel_profile": {"youtube": {"format": "longform", "aspect_ratio": "16:9"}},
+        }, actor="owner")
+        version = self.service.save_version(project["project_id"], "treatment",
+            {"script": "A moonlit promise."}, parent_version_id=None, actor="owner")
+        request = {
+            "project_id": project["project_id"], "version_id": version["version_id"],
+            "engine_commit": "5c05490cc55dfb54f8f4c333f0f0e79cb6500564",
+            "style_id": "illustrated-story", "idempotency_key": "story-film-render-001",
+            "resource_limits": {"cpu_seconds": 600, "memory_mb": 4096, "wall_time_seconds": 3600},
+            "request": {"profile": "youtube_longform", "render_mode": "story_film"},
+        }
+        job = self.service.create_render_job(request)
+        self.assertEqual(job["resource_limits"]["wall_time_seconds"], 3600)
+        with self.assertRaises(CreatorStudioError):
+            self.service.create_render_job({**request, "idempotency_key": "wrong-profile-001",
+                "request": {"profile": "youtube_shorts", "render_mode": "story_film"}})
+
     def test_render_job_idempotency_and_missing_renderer_fail_closed(self):
         project = self.create_project()
         version = self.service.save_version(

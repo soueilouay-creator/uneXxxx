@@ -14,7 +14,7 @@ RUN git init /tmp/ffmpeg-src \
  && ls -la /opt/ffmpeg/bin \
  && ( /opt/ffmpeg/bin/ffmpeg -version > /tmp/ffmpeg-version.txt 2>&1 || { cat /tmp/ffmpeg-version.txt; ls -la /opt/ffmpeg/bin; exit 1; } ) \
  && cat /tmp/ffmpeg-version.txt \
- && grep -F 'ffmpeg version 7.' /tmp/ffmpeg-version.txt \
+ && grep -E 'ffmpeg version n?7\.' /tmp/ffmpeg-version.txt \
  && rm -rf /tmp/ffmpeg-src
 ENV PATH="/opt/ffmpeg/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 RUN git init /opt/lemo-opuscar \

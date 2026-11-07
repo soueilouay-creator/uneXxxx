@@ -16,6 +16,7 @@ from unexpected_runtime.postgres_approval_ledger import PostgresApprovalLedger
 from unexpected_runtime.postgres_storage import PostgresStateStore
 from unexpected_runtime.coordinator import Coordinator
 from unexpected_runtime.http_api import create_server
+from unexpected_runtime.creator_studio import CreatorStudioService
 
 
 DSN = os.getenv("TEST_POSTGRES_DSN")
@@ -27,6 +28,35 @@ class PostgresRuntimeIntegrationTests(unittest.TestCase):
         self.store = PostgresStateStore(DSN)
         self.prefix = "ci-" + uuid.uuid4().hex[:12]
         self.agent = "orchestrator"
+
+    def test_creator_projects_versions_and_render_replay_persist_in_postgres(self):
+        service = CreatorStudioService(self.store)
+        project = service.create_project({
+            "title": self.prefix + "-video",
+            "topic": "synthetic CI project",
+            "channel_profile": {"youtube": {"format": "shorts"}, "tiktok": {"format": "vertical"}},
+            "language": "English",
+        }, actor="ci-owner")
+        version = service.save_version(
+            project["project_id"], "brief", {"topic": "synthetic"},
+            parent_version_id=None, actor="ci-owner",
+        )
+        job_request = {
+            "project_id": project["project_id"],
+            "version_id": version["version_id"],
+            "engine_commit": "5c05490cc55dfb54f8f4c333f0f0e79cb6500564",
+            "style_id": "paper-cut",
+            "idempotency_key": self.prefix + "-render",
+            "resource_limits": {"cpu_seconds": 60, "memory_mb": 512, "wall_time_seconds": 90},
+            "request": {"mode": "synthetic-ci"},
+        }
+        first = service.create_render_job(job_request)
+        replay = service.create_render_job(job_request)
+        self.assertEqual(first["job_id"], replay["job_id"])
+        self.assertEqual(first["status"], "blocked")
+        self.assertEqual(service.get_render_job(first["job_id"])["job_id"], first["job_id"])
+        self.assertEqual(service.get_project(project["project_id"])["project_id"], project["project_id"])
+        self.assertEqual(len(service.list_versions(project["project_id"])), 1)
 
     def test_state_store_task_memory_knowledge_audit_and_queue(self):
         request = TaskRequest.create(

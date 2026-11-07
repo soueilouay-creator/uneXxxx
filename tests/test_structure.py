@@ -61,7 +61,17 @@ class StructureTests(unittest.TestCase):
   manifest=json.loads((ROOT/'agent_manifest.json').read_text())['agents']
   ids={a['id'] for a in manifest}
   self.assertEqual(len(ids),38)
-  self.assertEqual({s['id'] for s in skills},{'creative-media','skill-engineering','self-improvement','industrial-maintenance-sales'})
+  self.assertEqual({s['id'] for s in skills},{'creative-media','skill-engineering','self-improvement'})
+  self.assertTrue((ROOT/'skills/industrial-maintenance-sales/SKILL.md').read_text().startswith('# ARCHIVED — NOT ACTIVE (2026-11-07)'))
+  creator=next(s for s in skills if s['id']=='creative-media')
+  self.assertEqual(creator['version'],'1.1.0')
+  self.assertEqual(creator['invocation_mode'],'automatic')
+  self.assertEqual(creator['allowed_tools'],[])
+  refs=[item for item in creator['resources'] if item['kind']=='reference']
+  self.assertEqual(len(refs),1)
+  self.assertEqual(refs[0]['path'],'skills/creative-media/references/lemo-opuscar-interface.md')
+  self.assertEqual(hashlib.sha256((ROOT/refs[0]['path']).read_bytes()).hexdigest(),refs[0]['sha256'])
+  self.assertIn('5c05490cc55dfb54f8f4c333f0f0e79cb6500564',(ROOT/refs[0]['path']).read_text())
   for skill in skills:
    self.assertTrue(set(skill['agent_ids']).issubset(ids),skill['id'])
    path=(ROOT/skill['path']).resolve(); path.relative_to(ROOT.resolve())

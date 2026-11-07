@@ -498,3 +498,96 @@ class PostgresStateStore(PostgresIdempotencyMixin):
             item["result"] = json.loads(item.pop("result_json")) if item.get("result_json") else None
             items.append(item)
         return items
+    def creator_schema_ready(self):
+        with self._session() as c:
+            row=c.execute("SELECT version FROM schema_migrations WHERE version>=3 ORDER BY version DESC LIMIT 1").fetchone()
+        return bool(row and int(row["version"])>=3)
+
+    @staticmethod
+    def _creator_project_row(row):
+        if not row:return None
+        item=dict(row);item["channel_profile"]=json.loads(item.pop("channel_profile_json"));return item
+    @staticmethod
+    def _creator_version_row(row):
+        if not row:return None
+        item=dict(row);item["content"]=json.loads(item.pop("content_json"));return item
+    @staticmethod
+    def _creator_asset_row(row):
+        if not row:return None
+        item=dict(row);item["provenance"]=json.loads(item.pop("provenance_json"));item["license"]=json.loads(item.pop("license_json"));return item
+    @staticmethod
+    def _creator_render_job_row(row):
+        if not row:return None
+        item=dict(row);item["resource_limits"]=json.loads(item.pop("resource_limits_json"));item["result_manifest"]=json.loads(item.pop("result_manifest_json"));return item
+
+    def create_creator_project(self,project,actor):
+        now=time.time()
+        with self._session() as c:
+            c.execute("INSERT INTO creator_projects(project_id,title,topic,channel_profile_json,language,status,created_at,updated_at) VALUES(%s,%s,%s,%s,%s,%s,%s,%s)",
+                (project["project_id"],project["title"],project["topic"],self._dump(project["channel_profile"]),project["language"],"idea",now,now))
+            c.execute("INSERT INTO events(ts,event_type,payload_json) VALUES(%s,%s,%s)",(now,"creator_project_created",self._dump({"project_id":project["project_id"],"actor":actor})))
+        return self.get_creator_project(project["project_id"])
+    def get_creator_project(self,project_id):
+        with self._session() as c:row=c.execute("SELECT * FROM creator_projects WHERE project_id=%s",(project_id,)).fetchone()
+        return self._creator_project_row(row)
+    def list_creator_projects(self,limit=50):
+        with self._session() as c:rows=c.execute("SELECT * FROM creator_projects ORDER BY updated_at DESC,project_id LIMIT %s",(self._bounded(limit,200),)).fetchall()
+        return [self._creator_project_row(row) for row in rows]
+    def transition_creator_project(self,project_id,expected_status,next_status,actor,evidence):
+        now=time.time()
+        with self._session() as c:
+            cur=c.execute("UPDATE creator_projects SET status=%s,updated_at=%s WHERE project_id=%s AND status=%s",(next_status,now,project_id,expected_status))
+            if cur.rowcount!=1:return None
+            c.execute("INSERT INTO events(ts,event_type,payload_json) VALUES(%s,%s,%s)",(now,"creator_project_transition",self._dump({"project_id":project_id,"from":expected_status,"to":next_status,"actor":actor,"evidence":evidence})))
+            row=c.execute("SELECT * FROM creator_projects WHERE project_id=%s",(project_id,)).fetchone()
+        return self._creator_project_row(row)
+    def create_creator_version(self,project_id,version_id,kind,content,parent_version_id,actor):
+        now=time.time()
+        with self._session() as c:
+            project=c.execute("SELECT project_id FROM creator_projects WHERE project_id=%s FOR UPDATE",(project_id,)).fetchone()
+            if not project:raise ValueError("Unknown creator project.")
+            if parent_version_id and not c.execute("SELECT 1 FROM creator_project_versions WHERE project_id=%s AND version_id=%s",(project_id,parent_version_id)).fetchone():raise ValueError("Parent version does not belong to this project.")
+            row=c.execute("SELECT COALESCE(MAX(version_no),0)+1 AS next_version FROM creator_project_versions WHERE project_id=%s",(project_id,)).fetchone()
+            no=int(row["next_version"])
+            c.execute("INSERT INTO creator_project_versions(version_id,project_id,version_no,kind,content_json,parent_version_id,created_at) VALUES(%s,%s,%s,%s,%s,%s,%s)",(version_id,project_id,no,kind,self._dump(content),parent_version_id,now))
+            c.execute("INSERT INTO events(ts,event_type,payload_json) VALUES(%s,%s,%s)",(now,"creator_version_created",self._dump({"project_id":project_id,"version_id":version_id,"version_no":no,"kind":kind,"actor":actor})))
+            row=c.execute("SELECT * FROM creator_project_versions WHERE version_id=%s",(version_id,)).fetchone()
+        return self._creator_version_row(row)
+    def list_creator_versions(self,project_id):
+        with self._session() as c:rows=c.execute("SELECT * FROM creator_project_versions WHERE project_id=%s ORDER BY version_no",(project_id,)).fetchall()
+        return [self._creator_version_row(row) for row in rows]
+    def create_creator_asset(self,asset):
+        with self._session() as c:
+            c.execute("INSERT INTO creator_project_assets(asset_id,project_id,version_id,kind,storage_key,sha256,byte_size,mime_type,provenance_json,license_json,qa_status,created_at) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                (asset["asset_id"],asset["project_id"],asset["version_id"],asset["kind"],asset["storage_key"],asset["sha256"],asset["byte_size"],asset["mime_type"],self._dump(asset["provenance"]),self._dump(asset["license"]),asset["qa_status"],time.time()))
+            row=c.execute("SELECT * FROM creator_project_assets WHERE asset_id=%s",(asset["asset_id"],)).fetchone()
+        return self._creator_asset_row(row)
+    def list_creator_assets(self,project_id,version_id=None):
+        with self._session() as c:
+            if version_id:rows=c.execute("SELECT * FROM creator_project_assets WHERE project_id=%s AND version_id=%s ORDER BY created_at,asset_id",(project_id,version_id)).fetchall()
+            else:rows=c.execute("SELECT * FROM creator_project_assets WHERE project_id=%s ORDER BY created_at,asset_id",(project_id,)).fetchall()
+        return [self._creator_asset_row(row) for row in rows]
+    def create_creator_render_job(self,job):
+        with self._session() as c:
+            cur=c.execute("INSERT INTO creator_render_jobs(job_id,project_id,version_id,engine_commit,style_id,status,idempotency_key,request_hash,resource_limits_json,result_manifest_json,created_at,updated_at) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT(idempotency_key) DO NOTHING RETURNING job_id",
+                (job["job_id"],job["project_id"],job["version_id"],job["engine_commit"],job["style_id"],job["status"],job["idempotency_key"],job["request_hash"],self._dump(job["resource_limits"]),self._dump(job["result_manifest"]),job["created_at"],job["updated_at"]))
+            inserted=cur.rowcount==1
+            row=c.execute("SELECT * FROM creator_render_jobs WHERE idempotency_key=%s",(job["idempotency_key"],)).fetchone()
+            if not row:raise ValueError("Render job could not be stored.")
+            if row["request_hash"]!=job["request_hash"]:raise ValueError("Idempotency key reused for a different render request.")
+            result=self._creator_render_job_row(row);result["idempotent_replay"]=not inserted
+        return result
+    def get_creator_render_job(self,job_id):
+        with self._session() as c:row=c.execute("SELECT * FROM creator_render_jobs WHERE job_id=%s",(job_id,)).fetchone()
+        return self._creator_render_job_row(row)
+    def list_creator_render_jobs(self,project_id,limit=50):
+        with self._session() as c:rows=c.execute("SELECT * FROM creator_render_jobs WHERE project_id=%s ORDER BY created_at DESC LIMIT %s",(project_id,self._bounded(limit,200))).fetchall()
+        return [self._creator_render_job_row(row) for row in rows]
+    def transition_creator_render_job(self,job_id,expected_status,next_status,result_manifest):
+        now=time.time()
+        with self._session() as c:
+            cur=c.execute("UPDATE creator_render_jobs SET status=%s,result_manifest_json=%s,updated_at=%s WHERE job_id=%s AND status=%s",(next_status,self._dump(result_manifest),now,job_id,expected_status))
+            if cur.rowcount!=1:return None
+            c.execute("INSERT INTO events(ts,event_type,payload_json) VALUES(%s,%s,%s)",(now,"creator_render_job_transition",self._dump({"job_id":job_id,"from":expected_status,"to":next_status})))
+            row=c.execute("SELECT * FROM creator_render_jobs WHERE job_id=%s",(job_id,)).fetchone()
+        return self._creator_render_job_row(row)

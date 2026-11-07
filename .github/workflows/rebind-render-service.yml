@@ -1,10 +1,9 @@
 name: Rebind existing Render service without deploying
 
 on:
-  push:
+  pull_request:
+    types: [closed]
     branches: [main]
-    paths:
-      - ".github/workflows/rebind-render-service.yml"
   workflow_dispatch:
     inputs:
       confirm_rebind:
@@ -23,6 +22,7 @@ concurrency:
 
 jobs:
   rebind:
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.merged == true && github.event.pull_request.number == 6)
     name: Rebind canonical source (no deployment)
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -128,13 +128,17 @@ jobs:
             --url "https://api.render.com/v1/services/${SERVICE_ID}" \
             --header "Authorization: Bearer ${RENDER_API_KEY}" \
             --header "Accept: application/json")"
-          printf '%s' "${current}" | jq -e \
+          if ! printf '%s' "${current}" | jq -e \
             --arg id "${SERVICE_ID}" \
             --arg legacyRepo "${LEGACY_REPO}" \
             --arg legacyBranch "${LEGACY_BRANCH}" \
             --arg targetRepo "${TARGET_REPO}" \
             --arg targetBranch "${TARGET_BRANCH}" \
-            '.id == $id and (((.repo == $legacyRepo) and (.branch == $legacyBranch)) or ((.repo == $targetRepo) and (.branch == $targetBranch))) and .autoDeployTrigger == "off"' >/dev/null
+            '.id == $id and (((.repo == $legacyRepo) and (.branch == $legacyBranch)) or ((.repo == $targetRepo) and (.branch == $targetBranch))) and .autoDeployTrigger == "off"' >/dev/null; then
+            echo "::error::Render service preconditions do not match. Safe service fields:"
+            printf '%s' "${current}" | jq -c '{id, repo, branch, autoDeployTrigger}' >&2 || true
+            exit 1
+          fi
           echo "Current service identity, source and disabled auto-deploy match the expected cutover preconditions."
 
       - name: Rebind the existing service and verify the saved settings
@@ -152,33 +156,51 @@ jobs:
             --arg branch "${TARGET_BRANCH}" \
             '{repo: $repo, branch: $branch, autoDeployTrigger: "off"}')"
 
-          patched="$(curl --silent --show-error --fail-with-body \
+          patched=""
+          if ! patched="$(curl --silent --show-error --fail-with-body \
             --connect-timeout 10 --max-time 30 \
             --request PATCH \
             --url "https://api.render.com/v1/services/${SERVICE_ID}" \
             --header "Authorization: Bearer ${RENDER_API_KEY}" \
             --header "Accept: application/json" \
             --header "Content-Type: application/json" \
-            --data "${payload}")"
+            --data "${payload}")"; then
+            echo "::error::Render PATCH failed. Sanitized error details:"
+            printf '%s' "${patched}" | jq -c '{code, message}' >&2 || true
+            exit 1
+          fi
 
-          printf '%s' "${patched}" | jq -e \
+          if ! printf '%s' "${patched}" | jq -e \
             --arg id "${SERVICE_ID}" \
             --arg repo "${TARGET_REPO}" \
             --arg branch "${TARGET_BRANCH}" \
-            '.id == $id and .repo == $repo and .branch == $branch and .autoDeployTrigger == "off"' >/dev/null
+            '.id == $id and .repo == $repo and .branch == $branch and .autoDeployTrigger == "off"' >/dev/null; then
+            echo "::error::Render PATCH response does not match the target. Safe returned fields:"
+            printf '%s' "${patched}" | jq -c '{id, repo, branch, autoDeployTrigger}' >&2 || true
+            exit 1
+          fi
 
-          verified="$(curl --silent --show-error --fail-with-body \
+          verified=""
+          if ! verified="$(curl --silent --show-error --fail-with-body \
             --connect-timeout 10 --max-time 30 \
             --request GET \
             --url "https://api.render.com/v1/services/${SERVICE_ID}" \
             --header "Authorization: Bearer ${RENDER_API_KEY}" \
-            --header "Accept: application/json")"
+            --header "Accept: application/json")"; then
+            echo "::error::Render verification GET failed. Sanitized error details:"
+            printf '%s' "${verified}" | jq -c '{code, message}' >&2 || true
+            exit 1
+          fi
 
-          printf '%s' "${verified}" | jq -e \
+          if ! printf '%s' "${verified}" | jq -e \
             --arg id "${SERVICE_ID}" \
             --arg repo "${TARGET_REPO}" \
             --arg branch "${TARGET_BRANCH}" \
-            '.id == $id and .repo == $repo and .branch == $branch and .autoDeployTrigger == "off"' >/dev/null
+            '.id == $id and .repo == $repo and .branch == $branch and .autoDeployTrigger == "off"' >/dev/null; then
+            echo "::error::Render GET verification returned unexpected settings. Safe returned fields:"
+            printf '%s' "${verified}" | jq -c '{id, repo, branch, autoDeployTrigger}' >&2 || true
+            exit 1
+          fi
 
           echo "Verified existing service ${SERVICE_ID}: canonical repository and main branch are saved; automatic deployment remains off."
           echo "No deployment was requested by this workflow."

@@ -138,6 +138,31 @@ class CreatorStudioService:
         if not job: raise CreatorStudioNotFound("Creator Studio render job was not found.")
         return job
 
+    def get_project_detail(self,project_id,limit=50):
+        project=self.get_project(project_id)
+        bounded=max(1,min(int(limit),200))
+        return {"project":project,
+                "versions":self.store.list_creator_versions(project_id),
+                "assets":self.store.list_creator_assets(project_id),
+                "render_jobs":self.store.list_creator_render_jobs(project_id,bounded)}
+
+    def recover_interrupted_jobs(self):
+        # Startup recovery never re-runs work. It only blocks orphaned worker leases.
+        recovered=[]
+        for project in self.store.list_creator_projects(200):
+            for job in self.store.list_creator_render_jobs(project["project_id"],200):
+                if job.get("status") not in {"queued","rendering"}:
+                    continue
+                manifest={"status":"blocked","code":"worker_lease_lost",
+                          "recovery":"startup_recovery_did_not_retry",
+                          "previous_status":job["status"],"recovered_at":time.time()}
+                updated=self.store.transition_creator_render_job(
+                    job["job_id"],job["status"],"blocked",manifest
+                )
+                if updated:
+                    recovered.append(updated["job_id"])
+        return {"recovered_count":len(recovered),"job_ids":recovered}
+
     def transition_project(self,project_id,expected_status,next_status,actor,evidence):
         actor=self._actor(actor); self.get_project(project_id)
         if next_status not in PROJECT_TRANSITIONS.get(expected_status,set()): raise CreatorStudioError(f"Project transition {expected_status!r} -> {next_status!r} is not allowed.")

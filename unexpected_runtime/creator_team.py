@@ -24,13 +24,13 @@ STAGES = (
         "stage_id": "production_storyboard",
         "agent_id": "media-producer",
         "version_kind": "storyboard",
-        "objective": "Turn the approved creative direction into a production package: narration script, timed scene list, original visual prompts, shot/motion directions, continuity guide, caption plan, and local model tasks. Clearly identify assets that still need local generation; do not claim they exist.",
+        "objective": "Return ONLY a strict JSON object with narration_script, music_prompt, and scenes[]. Each scene must contain scene_id, visual_prompt, motion_prompt, duration_seconds. Align scenes to the complete original story. No markdown fences, remote links, or invented assets. Preserve factual uncertainty.",
     },
     {
         "stage_id": "voice_and_sound",
         "agent_id": "voice-agent",
         "version_kind": "narration",
-        "objective": "Prepare the narration performance sheet: final spoken text, pronunciation notes, pacing, emotion, character voice notes, subtitle segmentation, and local sound/music brief. Do not claim audio has been synthesized.",
+        "objective": "Return ONLY a strict JSON object with narration_text identical byte-for-byte to the storyboard narration_script and captions_srt containing a timed English SRT subtitle track. No markdown fences. Do not claim audio exists until locally generated.",
     },
     {
         "stage_id": "platform_package",
@@ -197,15 +197,61 @@ class CreatorTeamRunner:
             "project_id": project_id, "stage_count": len(stage_results),
             "provider_route": "local", "video_rendered": False, "publishing_performed": False,
         })
+        media_result = None
+        media_preflight = None
+        media_pipeline = getattr(self.coordinator, "local_media_pipeline", None)
+        if media_pipeline is not None:
+            media_preflight = media_pipeline.preflight(probe_service=True)
+            if media_preflight.get("ready"):
+                storyboard_version = completed.get("production_storyboard")
+                voice_version = completed.get("voice_and_sound")
+                try:
+                    storyboard_output = storyboard_version["content"]["output"]
+                    voice_output = voice_version["content"]["output"]
+                    media_result = media_pipeline.produce(
+                        project_id, project, storyboard_output, voice_output)
+                    latest = studio.list_versions(project_id)
+                    parent_id = latest[-1]["version_id"] if latest else None
+                    studio.save_version(
+                        project_id, "qa_report",
+                        {"local_creator_team": {"stage_id": "local_media_production",
+                            "role_id": "media-producer", "provider_route": "local",
+                            "status": media_result["status"]},
+                         "media_result": media_result},
+                        parent_version_id=parent_id, actor=actor)
+                except Exception as exc:
+                    self.coordinator.store.log_event("creator_media_stage_blocked", None,
+                        "media-producer", {"project_id": project_id,
+                        "error_type": type(exc).__name__})
+                    media_result = {"status": "blocked", "reason": type(exc).__name__,
+                                    "external_ai_api": "disabled", "publishing_performed": False}
+            else:
+                media_result = {"status": "blocked",
+                    "reason": "one or more local models, weights, workflow graphs or services are not ready",
+                    "preflight": media_preflight, "external_ai_api": "disabled",
+                    "publishing_performed": False}
+
+        rendered = bool(media_result and media_result.get("video_rendered"))
+        qa_passed = bool(media_result and media_result.get("qa_passed"))
+        status = ("completed" if rendered and qa_passed else
+                  "qa_failed" if rendered else "production_package_ready")
+        self.coordinator.store.log_event("creator_team_completed", None, "orchestrator", {
+            "project_id": project_id, "stage_count": len(stage_results),
+            "provider_route": "local", "video_rendered": rendered,
+            "media_status": media_result.get("status") if media_result else "not_configured",
+            "publishing_performed": False,
+        })
         return {
-            "status": "production_package_ready",
+            "status": status,
             "project_id": project_id,
             "provider_route": "local",
             "stages": stage_results,
             "stage_count": len(stage_results),
-            "video_rendered": False,
+            "video_rendered": rendered,
+            "qa_passed": qa_passed,
+            "media_result": media_result,
+            "media_preflight": media_preflight,
             "publishing_performed": False,
-            "next_capability": "local_asset_generation_and_rendering",
         }
 
 

@@ -7,6 +7,10 @@ class CreatorMediaTests(unittest.TestCase):
   x=CreatorVideoQA.parse_black_freeze("black_duration:0.42\nfreeze_duration:1.4")
   self.assertEqual(x["black_longest_seconds"],.42);self.assertEqual(x["freeze_longest_seconds"],1.4)
   self.assertEqual(CreatorVideoQA.parse_loudness("Integrated loudness:\n I: -14.2 LUFS\nTrue peak:\n Peak: -1.1 dBFS"),{"integrated_lufs":-14.2,"true_peak_dbfs":-1.1})
+  trace=("frame I: -70.0 LUFS TPK: -10.0 dBFS\n"
+         "Summary:\n\nIntegrated loudness:\n  I: -13.9 LUFS\n  Threshold: -23.9 LUFS\n"
+         "True peak:\n  Peak: -10.0 dBFS\n")
+  self.assertEqual(CreatorVideoQA.parse_loudness(trace),{"integrated_lufs":-13.9,"true_peak_dbfs":-10.0})
  def test_captions_reject_overlap(self):
   with tempfile.TemporaryDirectory() as t:
    f=Path(t)/"captions.srt";f.write_text("1\n00:00:00,000 --> 00:00:02,000\nOpening.\n\n2\n00:00:02,100 --> 00:00:04,000\nNext scene.\n")

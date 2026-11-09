@@ -178,6 +178,7 @@ class OfflineLocalMediaEndToEndTests(unittest.TestCase):
             self.assertGreater(master.stat().st_size, 4096)
             self.assertEqual(render["profile"], "youtube_shorts")
             self.assertEqual((render["width"], render["height"]), (1080, 1920))
+            self.assertEqual(render["storyboard_stills_count"], 2)
             self.assertEqual(render["qa"]["status"], "passed")
             self.assertEqual(render["qa"]["checks"]["captions"]["cue_count"], 2)
             self.assertEqual(render["qa"]["checks"]["audio_stream"]["status"], "passed")

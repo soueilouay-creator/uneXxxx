@@ -27,6 +27,22 @@ class LocalAISupervisorTests(unittest.TestCase):
         self.assertIn("image", report["hardware_candidate_tasks"])
         self.assertFalse(report["probe_network_used"])
 
+    def test_intel_graphics_is_reported_without_assuming_acceleration_memory(self):
+        intel = [{"name": "Intel UHD Graphics", "memory_bytes": 0,
+                  "vendor": "intel", "memory_reported": False}]
+        with patch("unexpected_runtime.local_ai_supervisor._nvidia_devices", return_value=[]), \\
+             patch("unexpected_runtime.local_ai_supervisor._rocm_devices", return_value=[]), \\
+             patch("unexpected_runtime.local_ai_supervisor._mac_devices", return_value=[]), \\
+             patch("unexpected_runtime.local_ai_supervisor._intel_devices", return_value=intel), \\
+             patch("unexpected_runtime.local_ai_supervisor._ram_bytes", return_value=16 * 1024**3):
+            report = detect_hardware()
+        self.assertEqual(report["gpu_count"], 1)
+        self.assertEqual(report["gpus"][0]["vendor"], "intel")
+        self.assertIsNone(report["gpu_vram_total_gb"])
+        self.assertEqual(report["profile"], "cpu_only")
+        self.assertIn("llm", report["hardware_candidate_tasks"])
+        self.assertNotIn("image", report["hardware_candidate_tasks"])
+
     def test_cpu_only_profile_does_not_claim_video_generation(self):
         with patch("unexpected_runtime.local_ai_supervisor._nvidia_devices", return_value=[]), \
              patch("unexpected_runtime.local_ai_supervisor._rocm_devices", return_value=[]), \

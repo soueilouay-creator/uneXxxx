@@ -193,10 +193,6 @@ class CreatorTeamRunner:
                 stage["agent_id"], {"project_id": project_id, "stage_id": stage_id,
                 "version_id": version.get("version_id"), "provider_route": "local"})
 
-        self.coordinator.store.log_event("creator_team_completed", None, "orchestrator", {
-            "project_id": project_id, "stage_count": len(stage_results),
-            "provider_route": "local", "video_rendered": False, "publishing_performed": False,
-        })
         media_result = None
         media_preflight = None
         media_pipeline = getattr(self.coordinator, "local_media_pipeline", None)

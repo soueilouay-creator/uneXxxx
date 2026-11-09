@@ -352,7 +352,13 @@ class LocalMediaPipeline:
         segment_dir = root / "segments"
         segment_dir.mkdir(exist_ok=True)
         concat_lines = ["ffconcat version 1.0"]
-        for index, (scene, asset) in enumerate(zip(scenes, assets["videos"])):
+        image_assets = assets.get("images", [])
+        if len(image_assets) != len(scenes):
+            raise LocalMediaError("Every scene requires one verified storyboard image.")
+        for index, (scene, image_asset, asset) in enumerate(zip(scenes, image_assets, assets["videos"])):
+            still = root / image_asset["path"]
+            if still.is_symlink() or not still.is_file() or _digest(still) != image_asset["sha256"]:
+                raise LocalMediaError("A storyboard image failed checksum verification.")
             source = root / asset["path"]
             if source.is_symlink() or not source.is_file() or _digest(source) != asset["sha256"]:
                 raise LocalMediaError("A generated video segment failed checksum verification.")
@@ -360,9 +366,19 @@ class LocalMediaPipeline:
             target = segment_dir / segment_name
             if target.is_symlink():
                 raise LocalMediaError("A video segment cannot be a symbolic link.")
+            duration_value = str(scene["duration_seconds"])
+            scale = (f"scale={width}:{height}:force_original_aspect_ratio=increase,"
+                     f"crop={width}:{height},setsar=1")
+            filter_graph = (
+                f"[0:v]{scale},format=rgba[still];"
+                f"[1:v]{scale},format=rgba[motion];"
+                "[motion][still]overlay=shortest=1:enable='lt(t,0.45)',"
+                "fps=24,format=yuv420p[outv]"
+            )
             self._run_local([ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
-                "-stream_loop", "-1", "-i", str(source), "-t", str(scene["duration_seconds"]),
-                "-an", "-vf", f"fps=24,scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},setsar=1,format=yuv420p",
+                "-loop", "1", "-framerate", "24", "-t", duration_value, "-i", str(still),
+                "-stream_loop", "-1", "-i", str(source), "-t", duration_value,
+                "-filter_complex", filter_graph, "-map", "[outv]", "-an",
                 "-r", "24", "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
                 "-pix_fmt", "yuv420p", str(target)], root, 900)
             if not target.is_file() or target.stat().st_size < 4096:
@@ -395,6 +411,7 @@ class LocalMediaPipeline:
             raise LocalMediaError("Encoded local MP4 failed media QA (" + type(exc).__name__ + ").") from None
         return {"path": str(output.relative_to(root)), "sha256": qa["sha256"],
                 "byte_size": qa["byte_size"], "profile": "youtube_longform" if wide else "youtube_shorts",
-                "width": width, "height": height, "fps": 24, "qa": qa}
+                "width": width, "height": height, "fps": 24,
+                "storyboard_stills_count": len(scenes), "qa": qa}
 
 __all__ = ["LocalMediaPipeline", "LocalMediaError"]

@@ -42,7 +42,9 @@ class LocalAITests(unittest.TestCase):
 
     def test_verified_model_requires_weight_checksum_and_reviewed_licence(self):
         with self.assertRaises(LocalAIError):
-            validate_model_registry({"schema_version": 1, "models": [self.base_model()]})
+            validate_model_registry({"schema_version": 1, "models": [
+                self.base_model(state="verified", weight_license_status="verified")
+            ]})
         model = self.base_model(
             state="verified", weight_license_status="verified",
             weight_files=[{"path": "llm/model.gguf", "sha256": "a" * 64, "license_status": "verified"}]

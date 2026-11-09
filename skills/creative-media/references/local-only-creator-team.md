@@ -13,7 +13,7 @@ The Creator Team is a bounded workflow executed by the existing uneXpected V8 Co
 
 ## Execution contract
 
-- The runner must resolve the `local` route and verify the selected provider is marked local before invoking any stage.
+- The runner must resolve the `local` route and verify the selected provider is marked local before invoking any stage. No cloud model or remote service fallback is permitted.
 - Every task includes a local-only network policy and uses an idempotency key scoped to project and stage.
 - Every completed output is saved as a new immutable Creator Studio version with stage ID, canonical role ID, provider route and originating task ID.
 - On resume, completed stages are reused; missing stages run in order. Failure records a blocked event and stops downstream work.

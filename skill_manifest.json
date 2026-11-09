@@ -5,7 +5,7 @@
       "id": "creative-media",
       "version": "1.2.0",
       "path": "skills/creative-media/WORKFLOW.md",
-      "sha256": "e57705104a6f62d9c106738dac224a5ca3b42edc09c536bb719a036756f03464",
+      "sha256": "7ffc4a75345dc10d3e0c8aa040258ca8890a07996be3b27b12dd0b7403e7d53e",
       "agent_ids": [
         "creative-director",
         "media-producer",
@@ -53,7 +53,7 @@
         },
         {
           "path": "skills/creative-media/references/local-only-creator-team.md",
-          "sha256": "f8b63ff8e31f487ab68c0563be679e04b74c485e78ef3727f876d819e26a275d",
+          "sha256": "4442c7d223482d3a6054f963eef30a040f5a8f55b38bfc72a08fa515de8c9bea",
           "kind": "reference"
         }
       ]

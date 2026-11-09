@@ -62,3 +62,37 @@ Install ComfyUI and its reviewed model/node dependencies in a dedicated local en
 - Windows PowerShell: set `COMFYUI_HOME` and `COMFYUI_PYTHON`, then run `./local_ai/start-comfyui.ps1`.
 
 The launch scripts bind only to `127.0.0.1`, turn on ComfyUI offline mode, and disable optional partner/API nodes. They do not download missing models or custom nodes.
+
+
+## Hardware-aware supervisor and media stages
+
+Use these commands from the repository root:
+
+    python -m unexpected_runtime.cli local-ai hardware
+    python -m unexpected_runtime.cli local-ai preflight
+    python -m unexpected_runtime.cli local-ai status
+    python -m unexpected_runtime.cli local-ai start --service llm
+    python -m unexpected_runtime.cli local-ai start --service comfyui
+    python -m unexpected_runtime.cli local-ai stop
+
+Copy runtime_config.example.json to ~/.unexpected/local-ai/runtime_config.json and set only installed absolute executable paths, local working directories and loopback ports. The supervisor does not install or download weights. It checks process identity before signalling a process, strips provider keys and proxy credentials from child environments, and refuses public binds or unverified LLM models.
+
+### Image, voice, music and video workflow configuration
+
+Copy media_workflows.example.json to media_workflows.json. Add a task only after its local model weight files have passed the model registry's per-file SHA-256 and licence gates. Each configured task names:
+- a matching verified model registry entry;
+- one local ComfyUI workflow file and exact SHA-256;
+- explicit node-class allowlist and prompt-input binding;
+- minimum RAM, VRAM and free-disk requirements.
+
+The initial image candidate is FLUX.1-schnell. Its upstream weight licence is a candidate for Apache-2.0, but no exact weight bundle or checksum is installed; it remains discovered and unavailable until reviewed. Qwen3-TTS, ACE-Step and the local video candidates are equally gated. Do not mark a model verified until the exact full weight set and terms are checked.
+
+Run media preflight only after ComfyUI is running:
+
+    UNEXPECTED_AI_MODE=local_only python -m unexpected_runtime.cli local-media preflight --probe-service
+
+The Creator Team persists its six planning stages in Creator Studio. With UNEXPECTED_AI_MODE=local_only, the optional local media stage uses pinned ComfyUI graphs to generate per-scene images and videos, a narration WAV, and a music WAV. It writes a media_state.json record with the ComfyUI prompt ID before polling, so a stopped process can resume the same job. Completed assets are reused only when their prompt, workflow and file checksums still match.
+
+The local editing stage assembles scene videos, narration, music and SRT captions with FFmpeg; then CreatorVideoQA inspects the encoded MP4. A passing planning package is not a passing video. The media stage reports blocked until all four task workflows, verified weights, hardware requirements and local service are ready.
+
+**Network boundary:** ComfyUI's offline flag and partner-node disablement are necessary but are not a general OS firewall. During normal generation, run local AI services with outbound network blocked by the operating system or an isolated container. The renderer Docker worker independently uses --network=none. Never use online voice, music or video APIs as a fallback.

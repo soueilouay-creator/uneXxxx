@@ -20,6 +20,34 @@
       "notes": "Inference runtime only. Select a separate GGUF instruct model after hardware, model-card terms and weight-file checksum review."
     },
     {
+      "model_id": "qwen3-0.6b-q4",
+      "task": "llm",
+      "repository": "https://github.com/ggml-org/llama.cpp",
+      "revision": "0c6dca2faeb5650c74464bd5938f856058953ef9",
+      "runtime": "llama-server",
+      "repository_license": "MIT",
+      "weight_license_status": "verified",
+      "state": "verified",
+      "hardware_requirements": {
+        "ram_gb": 8,
+        "vram_gb": 0,
+        "disk_gb": 1
+      },
+      "weight_files": [
+        {
+          "path": "llm/Qwen3-0.6B-Q4_0.gguf",
+          "sha256": "da2572f16c06133561ce56accaa822216f2391ef4d37fba427801cd6736417d4",
+          "license_status": "verified",
+          "license": "Apache-2.0",
+          "model_repository": "ggml-org/Qwen3-0.6B-GGUF",
+          "source_revision": "a41486f827d17edd055fe6b3b0ba3f8d427c0519",
+          "source_url": "https://huggingface.co/ggml-org/Qwen3-0.6B-GGUF/resolve/a41486f827d17edd055fe6b3b0ba3f8d427c0519/Qwen3-0.6B-Q4_0.gguf",
+          "max_size_bytes": 600000000
+        }
+      ],
+      "notes": "Small CPU-capable local text model candidate. Model card declares Apache-2.0; this exact Q4_0 file is pinned to an immutable Hugging Face commit and upstream SHA-256. Requires 8 GB system RAM and at least 1 GB free disk by the uneXpected conservative profile. Generation quality and throughput must still be benchmarked on the target machine."
+    },
+    {
       "model_id": "comfyui-workflow-runtime",
       "task": "workflow",
       "repository": "https://github.com/Comfy-Org/ComfyUI",

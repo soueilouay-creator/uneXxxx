@@ -176,6 +176,8 @@ class LocalMediaPipeline:
         return path, state
 
     def generate_asset(self, task, project_id, asset_key, prompt):
+        if os.getenv("UNEXPECTED_AI_MODE", "").lower() not in {"local_only", "local-only"}:
+            raise LocalMediaError("Local media generation requires UNEXPECTED_AI_MODE=local_only.")
         if task not in EXTENSIONS or not isinstance(asset_key, str) or not IDENT.fullmatch(asset_key):
             raise LocalMediaError("Invalid task or asset key.")
         if (not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 8000
@@ -199,7 +201,7 @@ class LocalMediaPipeline:
             cached = project / record["path"]
             if cached.is_symlink() or not cached.is_file() or _digest(cached) != record["sha256"]:
                 raise LocalMediaError("Cached asset checksum mismatch.")
-            return {"status": "reused", **record}
+            return {**record, "status": "reused"}
         if record.get("status") == "queued":
             prompt_id = record.get("prompt_id")
             if not isinstance(prompt_id, str): raise LocalMediaError("Queued job has no prompt ID.")

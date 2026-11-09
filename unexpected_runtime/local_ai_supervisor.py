@@ -312,6 +312,27 @@ class LocalAISupervisor:
                 "port": port if isinstance(port, int) and not isinstance(port, bool) else None,
                 "kind": kind}
 
+    def _video_fallback_mode(self) -> str:
+        """Read the local media policy without network access; invalid config disables fallback."""
+        project_root = Path(__file__).resolve().parent.parent
+        config_path = Path(os.getenv(
+            "UNEXPECTED_MEDIA_WORKFLOWS",
+            str(project_root / "local_ai" / "media_workflows.json"),
+        )).expanduser()
+        try:
+            if config_path.is_symlink() or not config_path.is_file() or config_path.stat().st_size > 1_000_000:
+                return "disabled"
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, UnicodeError, json.JSONDecodeError):
+            return "disabled"
+        if (not isinstance(config, dict) or config.get("schema_version") != 1
+                or not isinstance(config.get("tasks"), dict)
+                or config.get("video_fallback", "disabled") not in {"disabled", "illustrated_story"}):
+            return "disabled"
+        if config.get("video_fallback") != "illustrated_story":
+            return "disabled"
+        return "illustrated_story" if shutil.which("ffmpeg") else "disabled"
+
     def preflight(self) -> dict[str, Any]:
         hardware = detect_hardware()
         registry = self._registry()
@@ -341,14 +362,27 @@ class LocalAISupervisor:
                            "no compatible hardware profile" if task not in hardware_tasks else
                            "no locally cached model has a verified licence and checksum"),
             })
-        required_model_tasks = {"llm", "image", "tts", "music", "video"}
+        video_fallback_mode = self._video_fallback_mode()
+        required_model_tasks = {"llm", "image", "tts", "music"}
+        if video_fallback_mode != "illustrated_story":
+            required_model_tasks.add("video")
         required_services = {"llm", "comfyui"}
         ready_services = {item["service"] for item in service_checks if item.get("ready")}
         missing_model_tasks = sorted(required_model_tasks - available_tasks)
         missing_services = sorted(required_services - ready_services)
         ready_to_generate = not missing_model_tasks and not missing_services
+        if video_fallback_mode == "illustrated_story" and "video" not in available_tasks:
+            video_task_reason = "native video model unavailable; illustrated-story procedural fallback is configured"
+        else:
+            video_task_reason = "ready" if "video" in available_tasks else (
+                "no compatible hardware profile" if "video" not in hardware_tasks else
+                "no locally cached model has a verified licence and checksum")
+        for task_result in task_results:
+            if task_result["task"] == "video":
+                task_result["reason"] = video_task_reason
         return {
             "mode": "local_only",
+            "video_fallback_mode": video_fallback_mode,
             "hardware": hardware,
             "model_root": str(self.model_root),
             "model_tasks": task_results,
@@ -359,6 +393,7 @@ class LocalAISupervisor:
             "downloads_performed": False,
             "pipeline_readiness": {
                 "required_model_tasks": sorted(required_model_tasks),
+                "video_fallback_mode": video_fallback_mode,
                 "missing_model_tasks": missing_model_tasks,
                 "required_services": sorted(required_services),
                 "missing_services": missing_services,

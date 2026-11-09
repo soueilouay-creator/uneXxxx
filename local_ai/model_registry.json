@@ -1,0 +1,95 @@
+{
+  "schema_version": 1,
+  "policy": {
+    "normal_generation_network": "blocked",
+    "bootstrap_network": "explicit_operator_action_only",
+    "cloud_fallback": false,
+    "model_weights_in_git": false
+  },
+  "models": [
+    {
+      "model_id": "llama-cpp-server",
+      "task": "llm",
+      "repository": "https://github.com/ggml-org/llama.cpp",
+      "revision": "0c6dca2faeb5650c74464bd5938f856058953ef9",
+      "runtime": "llama-server",
+      "repository_license": "MIT",
+      "weight_license_status": "unverified",
+      "state": "discovered",
+      "weight_files": [],
+      "notes": "Inference runtime only. Select a separate GGUF instruct model after hardware, model-card terms and weight-file checksum review."
+    },
+    {
+      "model_id": "comfyui-workflow-runtime",
+      "task": "image",
+      "repository": "https://github.com/Comfy-Org/ComfyUI",
+      "revision": "fca60fe70e5b84c5c6b058263653d15cb3401e44",
+      "runtime": "ComfyUI offline mode",
+      "repository_license": "GPL-3.0",
+      "weight_license_status": "unverified",
+      "state": "discovered",
+      "weight_files": [],
+      "notes": "Workflow runner, not an image model. Only reviewed local nodes and separately licensed weights may be enabled."
+    },
+    {
+      "model_id": "wan22-ti2v-5b",
+      "task": "video",
+      "repository": "https://github.com/Wan-Video/Wan2.2",
+      "revision": "1ea34ff48f87168174e12956e200b1d908b1c5ff",
+      "runtime": "Wan2.2 local inference / ComfyUI workflow",
+      "repository_license": "Apache-2.0",
+      "weight_license_status": "unverified",
+      "state": "discovered",
+      "weight_files": [],
+      "notes": "First video-generation candidate. Exact weight terms, files, memory requirements and target-machine throughput remain to be verified."
+    },
+    {
+      "model_id": "ltx25-audiovideo",
+      "task": "video",
+      "repository": "https://github.com/Lightricks/LTX-2",
+      "revision": "4f521619ae0029e8fbb64d555030c2b121a33b4f",
+      "runtime": "LTX-2.5 local pipeline",
+      "repository_license": "Apache-2.0",
+      "weight_license_status": "unverified",
+      "state": "discovered",
+      "weight_files": [],
+      "notes": "Alternative video/audio candidate. Full published weight bundle is large; do not select before disk and GPU benchmark."
+    },
+    {
+      "model_id": "qwen3-tts",
+      "task": "tts",
+      "repository": "https://github.com/QwenLM/Qwen3-TTS",
+      "revision": "022e286b98fbec7e1e916cb940cdf532cd9f488e",
+      "runtime": "Qwen3-TTS local inference",
+      "repository_license": "Apache-2.0",
+      "weight_license_status": "unverified",
+      "state": "discovered",
+      "weight_files": [],
+      "notes": "English/French voice-generation candidate. Verify exact model card, supported voice usage and files before enabling; Arabic is not in the documented ten-language list."
+    },
+    {
+      "model_id": "ace-step-15",
+      "task": "music",
+      "repository": "https://github.com/ace-step/ACE-Step-1.5",
+      "revision": "ca1e85fe9430179831e6bc6be790c332190a3866",
+      "runtime": "ACE-Step 1.5 local inference",
+      "repository_license": "MIT",
+      "weight_license_status": "unverified",
+      "state": "discovered",
+      "weight_files": [],
+      "notes": "Soundtrack candidate. Model-weight licence must be checked independently from repository licence."
+    },
+    {
+      "model_id": "whisper-cpp",
+      "task": "asr",
+      "repository": "https://github.com/ggml-org/whisper.cpp",
+      "revision": "f92e1e4d1056700c39d4e86c1140f0a088fe1ab6",
+      "runtime": "whisper.cpp",
+      "repository_license": "MIT",
+      "weight_license_status": "unverified",
+      "state": "discovered",
+      "weight_files": [],
+      "notes": "Offline transcription/subtitle alignment candidate. Exact model artifact and checksum are not selected yet."
+    }
+  ]
+}

@@ -164,7 +164,7 @@ Add a guided local installer for Windows, Linux and macOS, with platform-specifi
 - ask for explicit user confirmation for model terms where required;
 - download selected model files only during bootstrap;
 - generate local configuration without secrets;
-- run smoke tests and write a signed/checksummed local capability report;
+- run smoke tests and write a checksum-protected local capability report;
 - provide a single local start/stop/status command.
 
 Production services bind to loopback or a private internal network. The renderer remains a non-root, no-network, resource-limited sandbox. Local outputs and databases are stored in the configured local workspace. Backups remain local unless the owner separately configures a destination.

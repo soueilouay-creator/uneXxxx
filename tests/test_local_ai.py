@@ -25,8 +25,8 @@ class LocalAITests(unittest.TestCase):
             "revision": "a" * 40,
             "runtime": "llama-server",
             "repository_license": "MIT",
-            "weight_license_status": "verified",
-            "state": "verified",
+            "weight_license_status": "unverified",
+            "state": "discovered",
             "weight_files": [],
         }
         item.update(overrides)
@@ -44,11 +44,13 @@ class LocalAITests(unittest.TestCase):
         with self.assertRaises(LocalAIError):
             validate_model_registry({"schema_version": 1, "models": [self.base_model()]})
         model = self.base_model(
+            state="verified", weight_license_status="verified",
             weight_files=[{"path": "llm/model.gguf", "sha256": "a" * 64, "license_status": "verified"}]
         )
         self.assertEqual(validate_model_registry({"schema_version": 1, "models": [model]})["models"][0]["state"], "verified")
         with self.assertRaises(LocalAIError):
             validate_model_registry({"schema_version": 1, "models": [self.base_model(
+                state="verified", weight_license_status="verified",
                 weight_files=[{"path": "llm/model.gguf", "sha256": "a" * 64, "license_status": "unverified"}]
             )]})
 
@@ -71,12 +73,13 @@ class LocalAITests(unittest.TestCase):
             weights.write_bytes(payload)
             digest = hashlib.sha256(payload).hexdigest()
             model = self.base_model(
+                state="verified", weight_license_status="verified",
                 weight_files=[{"path": "llm/model.gguf", "sha256": digest, "license_status": "verified"}]
             )
             result = inspect_model_availability(model, root)
             self.assertTrue(result["available"])
             self.assertEqual(result["verified_files"], 1)
-            tampered = self.base_model(weight_files=[
+            tampered = self.base_model(state="verified", weight_license_status="verified", weight_files=[
                 {"path": "llm/model.gguf", "sha256": "0" * 64, "license_status": "verified"}
             ])
             self.assertFalse(inspect_model_availability(tampered, root)["available"])

@@ -11,6 +11,15 @@ class CreatorMediaTests(unittest.TestCase):
          "Summary:\n\nIntegrated loudness:\n  I: -13.9 LUFS\n  Threshold: -23.9 LUFS\n"
          "True peak:\n  Peak: -10.0 dBFS\n")
   self.assertEqual(CreatorVideoQA.parse_loudness(trace),{"integrated_lufs":-13.9,"true_peak_dbfs":-10.0})
+ def test_stream_duration_mismatch_is_rejected(self):
+  measured=CreatorVideoQA.validate_stream_durations(10.0,10.0,10.0)
+  self.assertEqual(measured["video_seconds"],10.0)
+  with self.assertRaises(CreatorVideoQAError):
+   CreatorVideoQA.validate_stream_durations(4.0,10.0,10.0)
+  with self.assertRaises(CreatorVideoQAError):
+   CreatorVideoQA.validate_stream_durations(10.0,8.0,10.0)
+  with self.assertRaises(CreatorVideoQAError):
+   CreatorVideoQA.validate_stream_durations(float("nan"),10.0,10.0)
  def test_captions_reject_overlap(self):
   with tempfile.TemporaryDirectory() as t:
    f=Path(t)/"captions.srt";f.write_text("1\n00:00:00,000 --> 00:00:02,000\nOpening.\n\n2\n00:00:02,100 --> 00:00:04,000\nNext scene.\n")

@@ -83,7 +83,7 @@ class LocalModelBootstrap:
         self.model_root = raw_root.resolve()
         self.registry_path = Path(registry_path).expanduser()
         self.hardware_probe = hardware_probe
-        self.opener = opener or urllib.request.build_opener(_HuggingFaceRedirectHandler()).open
+        self.opener = opener or urllib.request.build_opener(urllib.request.ProxyHandler({}), _HuggingFaceRedirectHandler()).open
 
     def _registry(self) -> dict[str, Any]:
         try:
@@ -112,6 +112,9 @@ class LocalModelBootstrap:
             problems.append("insufficient system RAM for this model profile")
         if vram < float(requirements.get("vram_gb", 0)):
             problems.append("insufficient GPU memory for this model profile")
+        supported_tasks = hardware.get("hardware_candidate_tasks", [])
+        if not isinstance(supported_tasks, list) or model.get("task") not in supported_tasks:
+            problems.append("hardware profile has not marked this model task as compatible")
         weights = model.get("weight_files", [])
         if not isinstance(weights, list) or not weights:
             problems.append("no pinned model weight files are defined")

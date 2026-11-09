@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import json
+import math
 import os
 import re
 import shutil
@@ -176,10 +177,66 @@ class LocalComfyUIClient:
             return
         raise LocalComfyUIError("ComfyUI workflow contains an unsupported input value.")
 
+    @staticmethod
+    def _apply_input_overrides(workflow: dict[str, Any], bindings: Any, values: Any) -> None:
+        """Apply only explicitly mapped prompt/control inputs from a pinned workflow."""
+        if values is None:
+            values = {}
+        if bindings is None:
+            bindings = {}
+        if not isinstance(bindings, dict) or not isinstance(values, dict):
+            raise LocalComfyUIError("Workflow input bindings and values must be JSON objects.")
+        if len(bindings) > 32 or len(values) > 32 or set(values) - set(bindings):
+            raise LocalComfyUIError("Workflow inputs exceed the binding limit or contain an unbound value.")
+        safe_fields = {
+            "text", "prompt", "positive", "positive_prompt", "negative", "negative_prompt",
+            "seed", "steps", "cfg", "width", "height", "denoise", "strength",
+            "frames", "fps", "frame_rate", "duration",
+        }
+        for name, value in values.items():
+            if not isinstance(name, str) or not re.fullmatch(r"[a-z][a-z0-9_]{0,31}", name):
+                raise LocalComfyUIError("Workflow input binding names must be bounded identifiers.")
+            binding = bindings.get(name)
+            if not isinstance(binding, dict) or set(binding) != {"node_id", "field"}:
+                raise LocalComfyUIError("Every workflow binding must identify exactly one node ID and input field.")
+            node_id, field = binding.get("node_id"), binding.get("field")
+            if (not isinstance(node_id, str) or not _SAFE_NODE_ID.fullmatch(node_id)
+                    or not isinstance(field, str) or field not in safe_fields):
+                raise LocalComfyUIError("Workflow binding targets an unapproved node input.")
+            node = workflow.get(node_id)
+            inputs = node.get("inputs") if isinstance(node, dict) else None
+            if not isinstance(inputs, dict) or field not in inputs:
+                raise LocalComfyUIError("Workflow binding target is missing from the pinned workflow.")
+            prior = inputs[field]
+            if isinstance(value, str):
+                if (not isinstance(prior, str) or not value.strip() or len(value) > 8000
+                        or _REMOTE_SCHEME.search(value)
+                        or value.startswith(("/", "\\\\"))
+                        or re.match(r"^[A-Za-z]:[\\\\/]", value)):
+                    raise LocalComfyUIError("Prompt input must be bounded plain text without URLs or file paths.")
+            elif isinstance(value, bool):
+                if not isinstance(prior, bool):
+                    raise LocalComfyUIError("Workflow input value type does not match the pinned input.")
+            elif isinstance(value, (int, float)):
+                if isinstance(value, float) and not math.isfinite(value):
+                    raise LocalComfyUIError("Workflow numeric inputs must be finite.")
+                if isinstance(prior, bool) or not isinstance(prior, (int, float)):
+                    raise LocalComfyUIError("Workflow input value type does not match the pinned input.")
+                if abs(float(value)) > 1_000_000_000:
+                    raise LocalComfyUIError("Workflow numeric input exceeds the supported bound.")
+            else:
+                raise LocalComfyUIError("Workflow input overrides must be bounded strings or numbers.")
+            inputs[field] = value
+
     def queue_workflow(self, workflow_path: str | Path, *, expected_sha256: str,
                        allowed_node_types: set[str] | list[str] | tuple[str, ...],
-                       client_id: str = "uneXpected-local-creator") -> dict[str, str]:
+                       client_id: str = "uneXpected-local-creator",
+                       input_bindings: dict[str, dict[str, str]] | None = None,
+                       input_values: dict[str, Any] | None = None) -> dict[str, str]:
         workflow = self._load_workflow(workflow_path, expected_sha256, allowed_node_types)
+        self._apply_input_overrides(workflow, input_bindings, input_values)
+        if not isinstance(client_id, str) or not re.fullmatch(r"[A-Za-z0-9._-]{1,80}", client_id):
+            raise LocalComfyUIError("Local ComfyUI client ID is invalid.")
         raw, _ = self._request("POST", "/prompt", {"prompt": workflow, "client_id": client_id})
         data = self._json(raw)
         prompt_id = data.get("prompt_id")

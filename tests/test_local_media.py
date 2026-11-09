@@ -67,6 +67,39 @@ class LocalMediaTests(unittest.TestCase):
             hardware_probe=hardware)
         return pipeline, client, config, wf_hash, root
 
+    def test_render_rejects_missing_video_segments_instead_of_truncating_zip(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pipeline, *_ = self._fixture(Path(tmp))
+            with patch("unexpected_runtime.local_media.shutil.which",
+                       side_effect=["/usr/bin/ffmpeg", "/usr/bin/ffprobe"]):
+                with self.assertRaisesRegex(LocalMediaError, "one verified image and one verified video segment"):
+                    pipeline._render(
+                        "12345678-abcd", {},
+                        [{"duration_seconds": 5.0}, {"duration_seconds": 5.0}],
+                        {"images": [{}], "videos": []},
+                        "1\\n00:00:00,000 --> 00:00:01,000\\nTest.\\n",
+                        motion_mode="illustrated_story",
+                    )
+
+    def test_render_rejects_audio_assets_with_wrong_checksum(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pipeline, *_ = self._fixture(root)
+            project = pipeline._project("12345678-abcd")
+            (project / "narration.wav").write_bytes(b"not-audio")
+            (project / "music.wav").write_bytes(b"not-audio")
+            with patch("unexpected_runtime.local_media.shutil.which",
+                       side_effect=["/usr/bin/ffmpeg", "/usr/bin/ffprobe"]):
+                with self.assertRaisesRegex(LocalMediaError, "Narration asset failed checksum verification"):
+                    pipeline._render(
+                        "12345678-abcd", {}, [],
+                        {"images": [], "videos": [],
+                         "narration": {"path": "narration.wav", "sha256": "0" * 64},
+                         "music": {"path": "music.wav", "sha256": "0" * 64}},
+                        "1\\n00:00:00,000 --> 00:00:01,000\\nTest.\\n",
+                        motion_mode="illustrated_story",
+                    )
+
     def test_local_mode_is_mandatory_and_never_falls_back(self):
         with tempfile.TemporaryDirectory() as tmp:
             pipeline, client, *_ = self._fixture(Path(tmp))

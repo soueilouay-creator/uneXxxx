@@ -70,7 +70,7 @@ def run():
     progress("rendering")
     try:
      rendered = subprocess.run(
-      ["node","core/render/video.mjs",str(project),"--fps",str(p["fps"]),"--workers","2","--size",f'{p["width"]}x{p["height"]}',"--out",str(video)],
+      ["node","core/render/video.mjs",str(project),"--fps",str(p["fps"]),"--workers","1","--size",f'{p["width"]}x{p["height"]}',"--out",str(video)],
       cwd=engine,check=True,shell=False,capture_output=True,text=True,
       timeout=max(1,int(deadline-time.monotonic())),
       env={**os.environ,"HOME":"/tmp","PLAYWRIGHT_BROWSERS_PATH":"/ms-playwright"})

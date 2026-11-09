@@ -54,6 +54,8 @@ jobs:
           --health-retries 5
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -147,6 +149,56 @@ jobs:
           print(f'Built {target} ({target.stat().st_size} bytes)')
           PY
           echo "UNEXPECTED_PACKAGE_ZIP=$RUNNER_TEMP/uneXpected_v8_command_center.zip" >> "$GITHUB_ENV"
+      - name: Verify changed-file SHA-256 inventory
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          python - <<'PY'
+          import hashlib
+          import os
+          import subprocess
+          from pathlib import Path
+
+          base = os.environ["BASE_SHA"]
+          if not base or len(base) != 40:
+              raise SystemExit("A full pull-request base SHA is required.")
+          manifest = Path("FILE_INVENTORY_SHA256.txt")
+          entries = {}
+          for number, line in enumerate(manifest.read_text(encoding="utf-8").splitlines(), 1):
+              if not line.strip():
+                  continue
+              digest, separator, relative = line.partition("  ")
+              if not separator or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+                  raise SystemExit(f"Malformed SHA-256 inventory entry at line {number}.")
+              if relative in entries:
+                  raise SystemExit(f"Duplicate inventory path: {relative}")
+              path = Path(relative)
+              if path.is_absolute() or ".." in path.parts or relative == str(manifest):
+                  raise SystemExit(f"Unsafe or self-referential inventory path: {relative}")
+              entries[relative] = digest
+
+          changed = subprocess.run(
+              ["git", "diff", "--name-only", "--diff-filter=ACMRT", f"{base}...HEAD"],
+              check=True, capture_output=True, text=True,
+          ).stdout.splitlines()
+          required = [item for item in changed if item != str(manifest)]
+          missing = sorted(set(required) - set(entries))
+          stale = []
+          for relative in required:
+              path = Path(relative)
+              if path.is_symlink() or not path.is_file():
+                  stale.append(f"{relative}: missing or unsafe file")
+                  continue
+              actual = hashlib.sha256(path.read_bytes()).hexdigest()
+              if entries[relative] != actual:
+                  stale.append(f"{relative}: expected {entries[relative]}, found {actual}")
+          if missing or stale:
+              print("Missing inventory entries:", missing)
+              print("Stale inventory entries:", stale)
+              raise SystemExit(1)
+          print(f"Verified SHA-256 inventory for {len(required)} changed files.")
+          PY
       - name: Run regression and security suite
         run: python -m unittest discover -s tests -v
       - name: Build single-process Docker image

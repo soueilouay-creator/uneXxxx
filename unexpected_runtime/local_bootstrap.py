@@ -281,8 +281,6 @@ class LocalModelBootstrap:
     def install(self, model_id: str, *, allow_network: bool = False) -> dict[str, Any]:
         if allow_network is not True:
             raise LocalModelBootstrapError("Model downloads require the explicit --allow-network bootstrap flag.")
-        if os.getenv("UNEXPECTED_AI_MODE", "").lower() in {"local_only", "local-only"} and os.getenv("UNEXPECTED_BOOTSTRAP_ACTIVE") != "1":
-            raise LocalModelBootstrapError("Bootstrap must be invoked as a separate operation, outside normal local-only production.")
         registry = self._registry()
         model = next((item for item in registry["models"] if item["model_id"] == model_id), None)
         if model is None:

@@ -60,9 +60,11 @@ class LocalMediaPipeline:
         except (OSError, ValueError, UnicodeError, json.JSONDecodeError):
             raise LocalMediaError("Local media workflow config is missing or invalid.") from None
         if (not isinstance(data, dict) or data.get("schema_version") != 1
-                or set(data) - {"schema_version", "comfyui_url", "workflow_root", "tasks"}
+                or set(data) - {"schema_version", "comfyui_url", "workflow_root", "tasks", "video_fallback"}
                 or not isinstance(data.get("tasks"), dict) or set(data["tasks"]) - set(EXTENSIONS)):
             raise LocalMediaError("Unsupported local media workflow config.")
+        if data.get("video_fallback", "disabled") not in {"disabled", "illustrated_story"}:
+            raise LocalMediaError("Unsupported local video fallback mode.")
         return data
 
     def _registry(self):
@@ -138,15 +140,32 @@ class LocalMediaPipeline:
             config, registry, hardware = self._config(), self._registry(), self.hardware_probe()
             root = self._workflow_root(config)
             tasks = {}
+            fallback_enabled = config.get("video_fallback", "disabled") == "illustrated_story"
             for task in EXTENSIONS:
                 issues = self._check(task, config["tasks"].get(task), registry, hardware, root)
-                tasks[task] = {"ready": not issues, "issues": issues}
+                if task == "video" and issues and fallback_enabled:
+                    fallback_issues = []
+                    if not shutil.which("ffmpeg"):
+                        fallback_issues.append("FFmpeg is required for procedural illustrated motion")
+                    tasks[task] = {
+                        "ready": not fallback_issues,
+                        "issues": fallback_issues,
+                        "mode": "illustrated_story_procedural",
+                        "fallback_reason": issues,
+                    }
+                else:
+                    tasks[task] = {
+                        "ready": not issues,
+                        "issues": issues,
+                        "mode": "model_generated" if task == "video" else "local_model",
+                    }
             service = {"status": "not_checked", "local": True}
             if probe_service and all(v["ready"] for v in tasks.values()):
                 try: service = self._client(config, root).probe()
                 except LocalComfyUIError as exc: service = {"status": "unavailable", "local": True, "error": str(exc)}
             return {"mode": "local_only", "ready": all(v["ready"] for v in tasks.values())
                     and service["status"] in {"available", "not_checked"}, "tasks": tasks,
+                    "video_mode": tasks["video"].get("mode"),
                     "hardware": hardware, "comfyui": service, "external_ai_api": "disabled",
                     "downloads_performed": False}
         except LocalMediaError as exc:
@@ -263,9 +282,105 @@ class LocalMediaPipeline:
             raise LocalMediaError(label + " output must be a JSON object.")
         return data
 
+    def _procedural_motion_asset(self, project_id, scene_id, image_asset, duration_seconds, project):
+        """Create labelled, deterministic motion from a verified local still when no video model fits."""
+        root = self._project(project_id)
+        relative = Path(image_asset.get("path", ""))
+        if relative.is_absolute() or ".." in relative.parts or not relative.parts:
+            raise LocalMediaError("Storyboard image path is unsafe.")
+        still = root / relative
+        if still.is_symlink() or not still.is_file() or _digest(still) != image_asset.get("sha256"):
+            raise LocalMediaError("Procedural motion requires a checksum-verified storyboard still.")
+        try:
+            still.resolve().relative_to(root.resolve())
+        except ValueError:
+            raise LocalMediaError("Storyboard image escapes its project directory.") from None
+        duration = float(duration_seconds)
+        if not math.isfinite(duration) or not 2 <= duration <= 180:
+            raise LocalMediaError("Procedural motion duration is invalid.")
+        channels = project.get("channel_profile", {})
+        youtube = channels.get("youtube", {}) if isinstance(channels, dict) else {}
+        wide = isinstance(youtube, dict) and (
+            youtube.get("format") == "longform" or youtube.get("aspect_ratio") == "16:9")
+        width, height = (1920, 1080) if wide else (1080, 1920)
+        motion_spec = {
+            "mode": "illustrated_story_procedural_v1",
+            "still_sha256": image_asset["sha256"],
+            "duration_seconds": round(duration, 3),
+            "resolution": [width, height],
+            "fps": 24,
+        }
+        prompt_hash = hashlib.sha256(json.dumps(
+            motion_spec, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        workflow_hash = hashlib.sha256(b"uneXpected-ffmpeg-illustrated-motion-v1").hexdigest()
+        state_path, state = self._state(root)
+        key = "video:" + scene_id
+        record = state["assets"].get(key, {})
+        if record and (record.get("prompt_sha256") != prompt_hash
+                       or record.get("workflow_sha256") != workflow_hash):
+            raise LocalMediaError("Procedural video asset key was reused with different source or timing.")
+        if record.get("status") == "completed":
+            cached = root / record["path"]
+            if cached.is_symlink() or not cached.is_file() or _digest(cached) != record.get("sha256"):
+                raise LocalMediaError("Cached procedural motion checksum mismatch.")
+            return {**record, "status": "reused"}
+        ffmpeg = shutil.which("ffmpeg")
+        if not ffmpeg:
+            raise LocalMediaError("FFmpeg is required for illustrated-story motion.")
+        output_dir = root / "assets" / "video" / scene_id
+        output_dir.mkdir(parents=True, exist_ok=True)
+        if output_dir.is_symlink():
+            raise LocalMediaError("Procedural motion output directory cannot be a symbolic link.")
+        output = output_dir / "illustrated-motion.mp4"
+        temporary = output_dir / "illustrated-motion.part.mp4"
+        if output.is_symlink() or temporary.is_symlink():
+            raise LocalMediaError("Procedural motion output cannot be a symbolic link.")
+        filter_graph = (
+            f"scale={width}:{height}:force_original_aspect_ratio=increase,"
+            f"crop={width}:{height},"
+            f"zoompan=z='min(zoom+0.0012,1.12)':"
+            f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
+            f"d=1:s={width}x{height}:fps=24,format=yuv420p"
+        )
+        try:
+            self._run_local([
+                ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+                "-loop", "1", "-framerate", "24", "-i", str(still),
+                "-vf", filter_graph, "-t", format(duration, ".3f"),
+                "-an", "-r", "24", "-c:v", "libx264", "-preset", "veryfast",
+                "-crf", "22", "-pix_fmt", "yuv420p", str(temporary),
+            ], root, 900)
+            if not temporary.is_file() or temporary.is_symlink() or temporary.stat().st_size < 4096:
+                raise LocalMediaError("Procedural motion did not produce a valid MP4 segment.")
+            os.replace(temporary, output)
+        except Exception:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise
+        completed = {
+            "status": "completed", "task": "video",
+            "path": str(output.relative_to(root)),
+            "sha256": _digest(output), "byte_size": output.stat().st_size,
+            "prompt_sha256": prompt_hash, "workflow_sha256": workflow_hash,
+            "provider": "ffmpeg-local-procedural",
+            "video_mode": "illustrated_story_procedural",
+            "source_image_sha256": image_asset["sha256"],
+            "completed_at": int(time.time()),
+        }
+        state["assets"][key] = completed
+        _save(state_path, state)
+        return completed
+
     def produce(self, project_id, project, storyboard_text, narration_text):
         if os.getenv("UNEXPECTED_AI_MODE", "").lower() not in {"local_only", "local-only"}:
             raise LocalMediaError("Production requires UNEXPECTED_AI_MODE=local_only.")
+        preflight = self.preflight(probe_service=True)
+        if not preflight.get("ready"):
+            raise LocalMediaError("Local media preflight is blocked: " + str(preflight.get("reason") or
+                preflight.get("tasks") or preflight.get("comfyui")))
+        video_mode = preflight.get("video_mode", "model_generated")
         storyboard = self._json_output(storyboard_text, "Storyboard")
         voice = self._json_output(narration_text, "Voice")
         script = storyboard.get("narration_script")
@@ -296,15 +411,21 @@ class LocalMediaPipeline:
                     or not math.isfinite(float(duration)) or not 2 <= float(duration) <= 180):
                 raise LocalMediaError("Storyboard scene " + str(index) + " is invalid.")
             checked_scenes.append({"scene_id": scene_id, "duration_seconds": float(duration)})
-            assets["images"].append(self.generate_asset("image", project_id, scene_id, image_prompt))
-            assets["videos"].append(self.generate_asset("video", project_id, scene_id, motion_prompt))
+            image_asset = self.generate_asset("image", project_id, scene_id, image_prompt)
+            assets["images"].append(image_asset)
+            if video_mode == "illustrated_story_procedural":
+                video_asset = self._procedural_motion_asset(
+                    project_id, scene_id, image_asset, float(duration), project)
+            else:
+                video_asset = self.generate_asset("video", project_id, scene_id, motion_prompt)
+            assets["videos"].append(video_asset)
         assets["narration"] = self.generate_asset("tts", project_id, "narration", spoken)
         assets["music"] = self.generate_asset("music", project_id, "soundtrack", music_prompt)
         render = self._render(project_id, project, checked_scenes, assets, captions)
         passed = render["qa"].get("status") == "passed"
         return {"status": "completed" if passed else "qa_failed", "project_id": project_id,
                 "provider_route": "local", "assets": assets, "render": render,
-                "video_rendered": True, "qa_passed": passed,
+                "video_mode": video_mode, "video_rendered": True, "qa_passed": passed,
                 "publishing_performed": False, "external_ai_api": "disabled"}
 
     def _run_local(self, command, cwd, timeout=900):

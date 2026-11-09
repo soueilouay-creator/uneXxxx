@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -29,9 +30,13 @@ def _validate_hf_url(value: Any) -> str:
     parsed = urllib.parse.urlsplit(value)
     host = (parsed.hostname or "").lower()
     allowed = host == ALLOWED_HOST or host.endswith(".huggingface.co") or host.endswith(".hf.co")
+    try:
+        port = parsed.port
+    except ValueError:
+        raise LocalModelBootstrapError("Model source URL has an invalid HTTPS port.") from None
     if (parsed.scheme != "https" or not allowed or parsed.username or parsed.password
-            or parsed.port not in (None, 443) or parsed.fragment):
-        raise LocalModelBootstrapError("Model downloads are restricted to approved HTTPS Hugging Face hosts.")
+            or port not in (None, 443) or parsed.fragment or parsed.query):
+        raise LocalModelBootstrapError("Model source URL must be an immutable, credential-free HTTPS Hugging Face URL.")
     if not re.search(r"/resolve/[0-9a-f]{40}/", parsed.path):
         raise LocalModelBootstrapError("Model source URL must pin an immutable 40-character repository revision.")
     return value
@@ -48,8 +53,12 @@ def _validate_redirect_url(value: str) -> None:
     parsed = urllib.parse.urlsplit(value)
     host = (parsed.hostname or "").lower()
     allowed = host == ALLOWED_HOST or host.endswith(".huggingface.co") or host.endswith(".hf.co")
+    try:
+        port = parsed.port
+    except ValueError:
+        raise LocalModelBootstrapError("A model download attempted a redirect with an invalid port.") from None
     if (parsed.scheme != "https" or not allowed or parsed.username or parsed.password
-            or parsed.port not in (None, 443)):
+            or port not in (None, 443)):
         raise LocalModelBootstrapError("A model download attempted an unsafe or unapproved redirect.")
 
 
@@ -106,11 +115,27 @@ class LocalModelBootstrap:
         if not isinstance(requirements, dict) or set(requirements) - {"ram_gb", "vram_gb", "disk_gb"}:
             problems.append("model hardware requirements are missing or invalid")
             requirements = {}
-        ram = float(hardware.get("ram_total_gb") or 0)
-        vram = float(hardware.get("gpu_vram_total_gb") or 0)
-        if ram < float(requirements.get("ram_gb", 0)):
+        def finite_gb(value: Any) -> float | None:
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                return None
+            number = float(value)
+            return number if math.isfinite(number) and number >= 0 else None
+
+        ram = finite_gb(hardware.get("ram_total_gb"))
+        vram = finite_gb(hardware.get("gpu_vram_total_gb"))
+        required_ram = finite_gb(requirements.get("ram_gb", 0))
+        required_vram = finite_gb(requirements.get("vram_gb", 0))
+        required_disk = finite_gb(requirements.get("disk_gb", 0))
+        if None in (ram, vram, required_ram, required_vram, required_disk):
+            problems.append("hardware report or model requirements contain invalid memory values")
+        ram = ram or 0
+        vram = vram or 0
+        required_ram = required_ram if required_ram is not None else float("inf")
+        required_vram = required_vram if required_vram is not None else float("inf")
+        required_disk = required_disk if required_disk is not None else float("inf")
+        if ram < required_ram:
             problems.append("insufficient system RAM for this model profile")
-        if vram < float(requirements.get("vram_gb", 0)):
+        if vram < required_vram:
             problems.append("insufficient GPU memory for this model profile")
         supported_tasks = hardware.get("hardware_candidate_tasks", [])
         if not isinstance(supported_tasks, list) or model.get("task") not in supported_tasks:
@@ -149,7 +174,7 @@ class LocalModelBootstrap:
                     total_bytes += expected
             else:
                 total_bytes += max_bytes
-        minimum_disk = float(requirements.get("disk_gb", 0)) * (1024 ** 3)
+        minimum_disk = required_disk * (1024 ** 3)
         if free_bytes < max(minimum_disk, total_bytes):
             problems.append("insufficient free disk space for the locked model files")
         return sorted(set(problems))

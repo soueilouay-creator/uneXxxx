@@ -218,6 +218,11 @@ class OfflineLocalMediaEndToEndTests(unittest.TestCase):
             self.assertEqual(fallback_result["status"], "completed", fallback_result)
             self.assertEqual(fallback_result["video_mode"], "illustrated_story_procedural")
             self.assertEqual(fallback_result["render"]["storyboard_stills_count"], 2)
+            self.assertEqual(fallback_result["render"]["qa"]["motion_mode"], "illustrated_story")
+            self.assertEqual(
+                fallback_result["render"]["qa"]["checks"]["freezes"]["status"],
+                "human_review_required",
+            )
             self.assertTrue(fallback_result["qa_passed"])
             self.assertEqual(client.queued, 10)
 

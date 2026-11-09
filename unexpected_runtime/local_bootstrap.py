@@ -122,7 +122,8 @@ class LocalModelBootstrap:
             return number if math.isfinite(number) and number >= 0 else None
 
         ram = finite_gb(hardware.get("ram_total_gb"))
-        vram = finite_gb(hardware.get("gpu_vram_total_gb"))
+        reported_vram = hardware.get("gpu_vram_total_gb")
+        vram = 0.0 if reported_vram is None else finite_gb(reported_vram)
         required_ram = finite_gb(requirements.get("ram_gb", 0))
         required_vram = finite_gb(requirements.get("vram_gb", 0))
         required_disk = finite_gb(requirements.get("disk_gb", 0))

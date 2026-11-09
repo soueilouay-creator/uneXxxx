@@ -338,7 +338,7 @@ class LocalMediaPipeline:
         filter_graph = (
             f"scale={width}:{height}:force_original_aspect_ratio=increase,"
             f"crop={width}:{height},"
-            f"zoompan=z='min(zoom+0.0012,1.12)':"
+            f"zoompan=z='1+0.10*on/({duration:.3f}*24)':"
             f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
             f"d=1:s={width}x{height}:fps=24,format=yuv420p"
         )
@@ -421,7 +421,10 @@ class LocalMediaPipeline:
             assets["videos"].append(video_asset)
         assets["narration"] = self.generate_asset("tts", project_id, "narration", spoken)
         assets["music"] = self.generate_asset("music", project_id, "soundtrack", music_prompt)
-        render = self._render(project_id, project, checked_scenes, assets, captions)
+        render = self._render(
+            project_id, project, checked_scenes, assets, captions,
+            motion_mode="illustrated_story" if video_mode == "illustrated_story_procedural" else "full_motion",
+        )
         passed = render["qa"].get("status") == "passed"
         return {"status": "completed" if passed else "qa_failed", "project_id": project_id,
                 "provider_route": "local", "assets": assets, "render": render,
@@ -445,7 +448,7 @@ class LocalMediaPipeline:
             raise LocalMediaError((lines[-1] if lines else "local renderer failed")[:400])
         return result
 
-    def _render(self, project_id, project, scenes, assets, captions):
+    def _render(self, project_id, project, scenes, assets, captions, motion_mode="full_motion"):
         ffmpeg, ffprobe = shutil.which("ffmpeg"), shutil.which("ffprobe")
         if not ffmpeg or not ffprobe:
             raise LocalMediaError("Local FFmpeg and ffprobe are required.")
@@ -527,7 +530,7 @@ class LocalMediaPipeline:
         from .creator_qa import CreatorVideoQA, CreatorVideoQAError
         try:
             qa = CreatorVideoQA(ffmpeg=ffmpeg, ffprobe=ffprobe, timeout_seconds=600).inspect(
-                output, captions_path=caption_file, motion_mode="full_motion")
+                output, captions_path=caption_file, motion_mode=motion_mode)
         except CreatorVideoQAError as exc:
             raise LocalMediaError("Encoded local MP4 failed media QA (" + type(exc).__name__ + ").") from None
         return {"path": str(output.relative_to(root)), "sha256": qa["sha256"],

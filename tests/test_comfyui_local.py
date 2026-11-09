@@ -113,6 +113,36 @@ class LocalComfyUITests(unittest.TestCase):
                 dest / "other")
         self.assertEqual(request.call_args.args[1].split("?")[0], "/view")
 
+
+    def test_workflow_rejects_absolute_and_parent_traversal_model_paths(self):
+        for value in ("/etc/passwd", "../outside/model.safetensors", "C:\\\\weights\\\\model.safetensors"):
+            bad = {"1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": value}}}
+            self.workflow_path.write_text(json.dumps(bad), encoding="utf-8")
+            digest = hashlib.sha256(self.workflow_path.read_bytes()).hexdigest()
+            with self.subTest(value=value):
+                with self.assertRaises(LocalComfyUIError):
+                    self.client.queue_workflow(self.workflow_path, expected_sha256=digest,
+                                               allowed_node_types={"CheckpointLoaderSimple"})
+
+    def test_collect_outputs_rejects_untrusted_node_ids_and_non_string_subfolders(self):
+        with self.assertRaises(LocalComfyUIError):
+            self.client.collect_outputs(
+                {"outputs": {"../../evil": {"images": [{"filename": "scene.png", "type": "output"}]}}},
+                self.root / "project")
+        with self.assertRaises(LocalComfyUIError):
+            self.client.collect_outputs(
+                {"outputs": {"2": {"images": [{"filename": "scene.png", "subfolder": [], "type": "output"}]}}},
+                self.root / "project")
+
+    def test_collect_outputs_supports_local_gif_media(self):
+        payload = b"gif-test"
+        with patch.object(self.client, "_request", return_value=(payload, "image/gif")):
+            outputs = self.client.collect_outputs(
+                {"outputs": {"2": {"gifs": [{"filename": "motion.gif", "type": "output"}]}}},
+                self.root / "project-gif")
+        self.assertEqual(outputs[0]["mime_type"], "image/gif")
+        self.assertTrue((self.root / "project-gif" / "node-2-motion.gif").is_file())
+
     def test_no_outputs_is_not_reported_as_success(self):
         with self.assertRaises(LocalComfyUIError):
             self.client.collect_outputs({"outputs": {}}, self.root / "empty")

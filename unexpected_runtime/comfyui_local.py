@@ -19,6 +19,7 @@ class LocalComfyUIError(RuntimeError):
 
 
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,120}$")
+_SAFE_NODE_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _REMOTE_SCHEME = re.compile(r"(?i)\b(?:https?|ftp|file)://")
 
 
@@ -152,18 +153,24 @@ class LocalComfyUIClient:
         return workflow
 
     @classmethod
-    def _validate_local_node_data(cls, value: Any) -> None:
+    def _validate_local_node_data(cls, value: Any, key: str | None = None) -> None:
         if isinstance(value, str):
             if _REMOTE_SCHEME.search(value):
                 raise LocalComfyUIError("ComfyUI workflow contains a remote URL; local-only workflows cannot use remote assets.")
+            path_keys = {"filename", "image", "video", "audio", "path", "directory",
+                         "ckpt_name", "unet_name", "vae_name", "clip_name", "model_path"}
+            if key in path_keys:
+                normal = value.replace("\\\\", "/")
+                if normal.startswith("/") or re.match(r"^[A-Za-z]:/", normal) or ".." in Path(normal).parts:
+                    raise LocalComfyUIError("ComfyUI workflow contains a model or asset path outside the local model directory.")
             return
         if isinstance(value, list):
             for item in value:
-                cls._validate_local_node_data(item)
+                cls._validate_local_node_data(item, key)
             return
         if isinstance(value, dict):
-            for item in value.values():
-                cls._validate_local_node_data(item)
+            for child_key, item in value.items():
+                cls._validate_local_node_data(item, str(child_key))
             return
         if value is None or isinstance(value, (int, float, bool)):
             return
@@ -206,7 +213,7 @@ class LocalComfyUIClient:
 
     @staticmethod
     def _safe_subfolder(value: Any) -> Path:
-        if value in {None, ""}:
+        if value is None or value == "":
             return Path()
         if not isinstance(value, str):
             raise LocalComfyUIError("ComfyUI output subfolder is invalid.")
@@ -224,6 +231,8 @@ class LocalComfyUIClient:
         root = root.resolve()
         saved: list[dict[str, Any]] = []
         for node_id, node_output in outputs.items():
+            if not isinstance(node_id, str) or not _SAFE_NODE_ID.fullmatch(node_id):
+                raise LocalComfyUIError("ComfyUI output node identifier is invalid.")
             if not isinstance(node_output, dict):
                 continue
             for kind in ("images", "videos", "gifs", "audio"):
@@ -250,7 +259,7 @@ class LocalComfyUIClient:
                     except ValueError:
                         raise LocalComfyUIError("ComfyUI output path escapes the local project directory.") from None
                     suffix = Path(filename).suffix.lower()
-                    allowed_suffixes = {".png", ".jpg", ".jpeg", ".webp", ".mp4", ".webm", ".wav", ".mp3", ".flac"}
+                    allowed_suffixes = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp4", ".webm", ".wav", ".mp3", ".flac"}
                     if suffix not in allowed_suffixes or not raw:
                         raise LocalComfyUIError("ComfyUI generated an unsupported or empty media file.")
                     target = target_dir / (f"node-{node_id}-{filename}")
@@ -274,7 +283,7 @@ class LocalComfyUIClient:
 
 def _mime_for_suffix(suffix: str) -> str:
     return {
-        ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp",
+        ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif",
         ".mp4": "video/mp4", ".webm": "video/webm", ".wav": "audio/wav", ".mp3": "audio/mpeg",
         ".flac": "audio/flac",
     }.get(suffix, "application/octet-stream")

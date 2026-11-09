@@ -149,6 +149,16 @@ class LocalModelBootstrapTests(unittest.TestCase):
                 bootstrap.install("tiny-local-llm", allow_network=True)
             self.assertFalse((model_root / "llm" / "model.gguf").exists())
 
+    def test_download_rejects_redirect_to_non_huggingface_host(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bootstrap, model_root, payload, _ = self._fixture(Path(tmp))
+            bootstrap.opener = lambda request, timeout=0: FakeResponse(
+                payload, url="https://untrusted.example/model.gguf",
+                headers={"Content-Length": str(len(payload))})
+            with self.assertRaises(LocalModelBootstrapError):
+                bootstrap.install("tiny-local-llm", allow_network=True)
+            self.assertFalse((model_root / "llm" / "model.gguf").exists())
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

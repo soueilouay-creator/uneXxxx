@@ -316,7 +316,6 @@ class LocalAISupervisor:
         hardware = detect_hardware()
         registry = self._registry()
         model_report = inspect_local_ai(self.model_root, registry)
-        model_by_id = {item["model_id"]: item for item in registry["models"]}
         available_by_id = {item["model_id"]: item["available"] for item in model_report["models"]}
         hardware_tasks = set(hardware["hardware_candidate_tasks"])
         available_tasks = {item["task"] for item in registry["models"]
@@ -342,6 +341,12 @@ class LocalAISupervisor:
                            "no compatible hardware profile" if task not in hardware_tasks else
                            "no locally cached model has a verified licence and checksum"),
             })
+        required_model_tasks = {"llm", "image", "tts", "music", "video"}
+        required_services = {"llm", "comfyui"}
+        ready_services = {item["service"] for item in service_checks if item.get("ready")}
+        missing_model_tasks = sorted(required_model_tasks - available_tasks)
+        missing_services = sorted(required_services - ready_services)
+        ready_to_generate = not missing_model_tasks and not missing_services
         return {
             "mode": "local_only",
             "hardware": hardware,
@@ -352,7 +357,14 @@ class LocalAISupervisor:
             "external_ai_api": "disabled",
             "normal_generation_network": "blocked by policy; local workflow clients only",
             "downloads_performed": False,
-            "ready_to_generate": bool(available_tasks) and any(item["ready"] for item in service_checks),
+            "pipeline_readiness": {
+                "required_model_tasks": sorted(required_model_tasks),
+                "missing_model_tasks": missing_model_tasks,
+                "required_services": sorted(required_services),
+                "missing_services": missing_services,
+                "ready": ready_to_generate,
+            },
+            "ready_to_generate": ready_to_generate,
         }
 
     @staticmethod

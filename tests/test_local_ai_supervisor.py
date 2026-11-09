@@ -11,6 +11,7 @@ from unexpected_runtime.local_ai_supervisor import (
     LocalAISupervisor,
     LocalSupervisorError,
     detect_hardware,
+    _intel_devices,
 )
 
 
@@ -26,6 +27,24 @@ class LocalAISupervisorTests(unittest.TestCase):
         self.assertIn("video", report["hardware_candidate_tasks"])
         self.assertIn("image", report["hardware_candidate_tasks"])
         self.assertFalse(report["probe_network_used"])
+
+    def test_intel_lspci_probe_reads_display_controller_names(self):
+        output = (
+            "00:02.0 VGA compatible controller: Intel Corporation UHD Graphics 630 [8086:3e92]\n"
+            "03:00.0 3D controller: NVIDIA Corporation Device [10de:2484]\n"
+            "04:00.0 Audio device: Intel Corporation Audio Controller [8086:a0c8]\n"
+        )
+        with (
+            patch("unexpected_runtime.local_ai_supervisor.platform.system", return_value="Linux"),
+            patch("unexpected_runtime.local_ai_supervisor.shutil.which", return_value="/usr/sbin/lspci"),
+            patch("unexpected_runtime.local_ai_supervisor._run_probe", return_value=output),
+        ):
+            devices = _intel_devices()
+        self.assertEqual(len(devices), 1)
+        self.assertIn("UHD Graphics 630", devices[0]["name"])
+        self.assertEqual(devices[0]["vendor"], "intel")
+        self.assertFalse(devices[0]["memory_reported"])
+        self.assertEqual(devices[0]["memory_bytes"], 0)
 
     def test_intel_graphics_is_reported_without_assuming_acceleration_memory(self):
         intel = [{"name": "Intel UHD Graphics", "memory_bytes": 0,

@@ -110,6 +110,38 @@ def _mac_devices() -> list[dict[str, Any]]:
     return devices
 
 
+def _intel_devices() -> list[dict[str, Any]]:
+    """Identify Intel display adapters without guessing shared or dedicated VRAM."""
+    if platform.system() == "Linux" and shutil.which("lspci"):
+        output = _run_probe(["lspci", "-nn"])
+        devices = []
+        for line in output.splitlines():
+            lower = line.lower()
+            if not any(token in lower for token in ("vga compatible controller", "3d controller", "display controller")):
+                continue
+            if "[8086:" not in lower and "intel corporation" not in lower:
+                continue
+            name = line.split(":", 2)[-1].strip()[:120] or "Intel graphics"
+            devices.append({"name": name, "memory_bytes": 0, "vendor": "intel",
+                            "memory_reported": False})
+        return devices
+    if platform.system() == "Windows":
+        executable = shutil.which("powershell") or shutil.which("pwsh")
+        if not executable:
+            return []
+        output = _run_probe([
+            executable, "-NoProfile", "-NonInteractive", "-Command",
+            "Get-CimInstance Win32_VideoController | ForEach-Object { $_.Name }",
+        ], timeout=8)
+        return [
+            {"name": line.strip()[:120], "memory_bytes": 0, "vendor": "intel",
+             "memory_reported": False}
+            for line in output.splitlines()
+            if "intel" in line.lower() and line.strip()
+        ]
+    return []
+
+
 def _ram_bytes() -> int | None:
     value = _memory_bytes()
     if value:
@@ -124,7 +156,7 @@ def _ram_bytes() -> int | None:
 
 def detect_hardware() -> dict[str, Any]:
     """Read-only hardware survey. Does not download, install or call external services."""
-    devices = _nvidia_devices() or _rocm_devices() or _mac_devices()
+    devices = _nvidia_devices() or _rocm_devices() or _mac_devices() or _intel_devices()
     total_vram = sum(item["memory_bytes"] for item in devices) if devices else None
     ram = _ram_bytes()
     vram_gb = (total_vram / (1024 ** 3)) if total_vram else 0.0

@@ -221,6 +221,25 @@ class OfflineLocalMediaEndToEndTests(unittest.TestCase):
             self.assertTrue(fallback_result["qa_passed"])
             self.assertEqual(client.queued, 10)
 
+            resumed_pipeline = LocalMediaPipeline(
+                config_path=config_path,
+                registry_path=registry_path,
+                model_root=model_root,
+                work_root=root / "creator",
+                comfy_client=client,
+                hardware_probe=hardware,
+            )
+            with patch.dict(os.environ, {"UNEXPECTED_AI_MODE": "local_only"}, clear=False):
+                resumed_result = resumed_pipeline.produce(
+                    "87654321-abcd",
+                    {"channel_profile": {"youtube": {"format": "shorts", "aspect_ratio": "9:16"}}},
+                    json.dumps(storyboard),
+                    json.dumps(voice),
+                )
+            self.assertEqual(resumed_result["status"], "completed", resumed_result)
+            self.assertTrue(all(a["status"] == "reused" for a in resumed_result["assets"]["videos"]))
+            self.assertEqual(client.queued, 10)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

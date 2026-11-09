@@ -89,6 +89,46 @@ class LocalComfyUITests(unittest.TestCase):
         self.assertTrue(any(type(item).__name__ == "ProxyHandler" and item.proxies == {} for item in handlers))
         self.assertTrue(any(type(item).__name__ == "_NoRedirect" for item in handlers))
 
+    def test_pinned_workflow_accepts_only_explicit_safe_prompt_overrides(self):
+        self.workflow["3"] = {"class_type": "CLIPTextEncode", "inputs": {"text": "placeholder"}}
+        self.workflow_path.write_text(json.dumps(self.workflow), encoding="utf-8")
+        digest = hashlib.sha256(self.workflow_path.read_bytes()).hexdigest()
+        response = FakeResponse({"prompt_id": "12345678-abcd"})
+        opener = MagicMock()
+        opener.open.return_value = response
+        with patch("unexpected_runtime.comfyui_local.urllib.request.build_opener", return_value=opener):
+            self.client.queue_workflow(
+                self.workflow_path, expected_sha256=digest,
+                allowed_node_types={"CheckpointLoaderSimple", "SaveImage", "CLIPTextEncode"},
+                input_bindings={"prompt": {"node_id": "3", "field": "text"}},
+                input_values={"prompt": "A lighthouse above a quiet sea at dawn"})
+        payload = json.loads(opener.open.call_args.args[0].data.decode("utf-8"))
+        self.assertEqual(payload["prompt"]["3"]["inputs"]["text"],
+                         "A lighthouse above a quiet sea at dawn")
+        self.assertEqual(payload["prompt"]["1"]["inputs"]["ckpt_name"], "model.safetensors")
+
+    def test_workflow_overrides_reject_urls_paths_and_unbound_fields(self):
+        self.workflow["3"] = {"class_type": "CLIPTextEncode", "inputs": {"text": "placeholder"}}
+        self.workflow_path.write_text(json.dumps(self.workflow), encoding="utf-8")
+        digest = hashlib.sha256(self.workflow_path.read_bytes()).hexdigest()
+        for value, bindings in (
+            ("https://example.com/prompt", {"prompt": {"node_id": "3", "field": "text"}}),
+            ("../private.txt", {"prompt": {"node_id": "3", "field": "text"}}),
+            ("not allowed", {"prompt": {"node_id": "1", "field": "ckpt_name"}}),
+        ):
+            with self.subTest(value=value, bindings=bindings):
+                with self.assertRaises(LocalComfyUIError):
+                    self.client.queue_workflow(
+                        self.workflow_path, expected_sha256=digest,
+                        allowed_node_types={"CheckpointLoaderSimple", "SaveImage", "CLIPTextEncode"},
+                        input_bindings=bindings, input_values={"prompt": value})
+        with self.assertRaises(LocalComfyUIError):
+            self.client.queue_workflow(
+                self.workflow_path, expected_sha256=digest,
+                allowed_node_types={"CheckpointLoaderSimple", "SaveImage", "CLIPTextEncode"},
+                input_bindings={"prompt": {"node_id": "3", "field": "text"}},
+                input_values={"prompt": "valid", "unbound": "invalid"})
+
     def test_history_wait_returns_completed_local_outputs(self):
         response = FakeResponse({"12345678-abcd": {"status": {"status_str": "success", "completed": True},
                                                    "outputs": {"2": {"images": [{"filename": "out.png", "type": "output"}]}}}})

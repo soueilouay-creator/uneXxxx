@@ -199,12 +199,14 @@ class LocalAISupervisorTests(unittest.TestCase):
                 {"model_id": item["model_id"], "available": item["model_id"] in available}
                 for item in registry["models"]
             ]}
-            with patch.dict(os.environ, {"UNEXPECTED_MEDIA_WORKFLOWS": str(media_config)}), \\
-                 patch("unexpected_runtime.local_ai_supervisor.detect_hardware", return_value=hardware), \\
-                 patch("unexpected_runtime.local_ai_supervisor.inspect_local_ai", return_value=model_report), \\
-                 patch.object(supervisor, "_registry", return_value=registry), \\
-                 patch.object(supervisor, "_read_config", return_value=config), \\
-                 patch.object(supervisor, "_service_check", side_effect=lambda name, spec, reg: {"service": name, "ready": True}):
+            with (
+                patch.dict(os.environ, {"UNEXPECTED_MEDIA_WORKFLOWS": str(media_config)}),
+                patch("unexpected_runtime.local_ai_supervisor.detect_hardware", return_value=hardware),
+                patch("unexpected_runtime.local_ai_supervisor.inspect_local_ai", return_value=model_report),
+                patch.object(supervisor, "_registry", return_value=registry),
+                patch.object(supervisor, "_read_config", return_value=config),
+                patch.object(supervisor, "_service_check", side_effect=lambda name, spec, reg: {"service": name, "ready": True}),
+            ):
                 report = supervisor.preflight()
             self.assertTrue(report["ready_to_generate"])
             self.assertEqual(report["video_fallback_mode"], "illustrated_story")

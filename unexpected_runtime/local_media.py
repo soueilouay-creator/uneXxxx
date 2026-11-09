@@ -1,5 +1,5 @@
 from __future__ import annotations
-import hashlib, json, math, os, re, shutil, time
+import hashlib, json, math, os, re, shutil, subprocess, time
 from pathlib import Path
 from .comfyui_local import LocalComfyUIClient, LocalComfyUIError
 from .local_ai import LocalAIError, inspect_model_availability, load_model_registry

@@ -3,9 +3,9 @@
   "skills": [
     {
       "id": "creative-media",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "path": "skills/creative-media/WORKFLOW.md",
-      "sha256": "49bd7ab9976e881d2abf666fbb9f9ff27a22724d2d62849c62a97d071017218f",
+      "sha256": "e57705104a6f62d9c106738dac224a5ca3b42edc09c536bb719a036756f03464",
       "agent_ids": [
         "creative-director",
         "media-producer",
@@ -40,15 +40,20 @@
         "creative media",
         "creator studio"
       ],
-      "source_ref": "uneXpected Creator Studio v1.1.0; Lemo Opuscar adapter reference pinned to 5c05490cc55dfb54f8f4c333f0f0e79cb6500564",
+      "source_ref": "uneXpected local-only Creator Studio v1.2.0; no cloud model APIs; Lemo Opuscar pinned",
       "status": "active",
-      "description": "Governed YouTube and TikTok Creator Studio workflow for research, storytelling, code-based film production, encoded-media QA and platform packaging.",
+      "description": "Local-only governed Creator Studio with resumable role-team orchestration, local model generation, rendering and encoded-media QA.",
       "invocation_mode": "automatic",
       "allowed_tools": [],
       "resources": [
         {
           "path": "skills/creative-media/references/lemo-opuscar-interface.md",
           "sha256": "9f392fe2ce2240d1d793ecb56959a071b634a19c44f8933f88708704869e1678",
+          "kind": "reference"
+        },
+        {
+          "path": "skills/creative-media/references/local-only-creator-team.md",
+          "sha256": "7ffbfb1b6f80a7062f5f6b96db06ca3bad0232c764713e35e8ae390fa0ded428",
           "kind": "reference"
         }
       ]

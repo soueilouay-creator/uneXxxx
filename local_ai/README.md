@@ -53,3 +53,12 @@ python -m unexpected_runtime.local_ai preflight --model-root ./models
 ```
 
 Inspection is read-only. It detects platform, CPU count, RAM where available, free disk space, common runtime executables and model-file availability. It does not download files, call web endpoints or start processes. Hardware-specific video-model choice is deferred to the local machine's measured capability report.
+
+## Local ComfyUI launch
+
+Install ComfyUI and its reviewed model/node dependencies in a dedicated local environment during bootstrap. Then launch it offline:
+
+- Linux/macOS: `COMFYUI_HOME=/path/to/ComfyUI COMFYUI_PYTHON=/path/to/python ./local_ai/start-comfyui.sh`
+- Windows PowerShell: set `COMFYUI_HOME` and `COMFYUI_PYTHON`, then run `./local_ai/start-comfyui.ps1`.
+
+The launch scripts bind only to `127.0.0.1`, turn on ComfyUI offline mode, and disable optional partner/API nodes. They do not download missing models or custom nodes.

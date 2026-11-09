@@ -68,11 +68,24 @@ def run():
      timeout_seconds=max(1,int(deadline-time.monotonic())))
    else:
     progress("rendering")
-    subprocess.run(["node","core/render/video.mjs",str(project),"--fps",str(p["fps"]),"--workers","2","--size",f'{p["width"]}x{p["height"]}',"--out",str(video)],
-     cwd=engine,check=True,shell=False,timeout=max(1,int(deadline-time.monotonic())),env={**os.environ,"HOME":"/tmp","PLAYWRIGHT_BROWSERS_PATH":"/ms-playwright"})
+    try:
+     rendered = subprocess.run(
+      ["node","core/render/video.mjs",str(project),"--fps",str(p["fps"]),"--workers","2","--size",f'{p["width"]}x{p["height"]}',"--out",str(video)],
+      cwd=engine,check=True,shell=False,capture_output=True,text=True,
+      timeout=max(1,int(deadline-time.monotonic())),
+      env={**os.environ,"HOME":"/tmp","PLAYWRIGHT_BROWSERS_PATH":"/ms-playwright"})
+    except subprocess.CalledProcessError as exc:
+     detail=(exc.stderr or exc.stdout or "No renderer diagnostic output").strip()
+     raise RuntimeError("Opuscar video render failed: "+detail[-3000:]) from None
     progress("muxing")
-    subprocess.run(["sh","core/render/mux.sh",str(video),str(audio),str(master),str(p["fps"]),"0"],
-     cwd=engine,check=True,shell=False,timeout=max(1,int(deadline-time.monotonic())),env={**os.environ,"HOME":"/tmp"})
+    try:
+     muxed = subprocess.run(
+      ["sh","core/render/mux.sh",str(video),str(audio),str(master),str(p["fps"]),"0"],
+      cwd=engine,check=True,shell=False,capture_output=True,text=True,
+      timeout=max(1,int(deadline-time.monotonic())),env={**os.environ,"HOME":"/tmp"})
+    except subprocess.CalledProcessError as exc:
+     detail=(exc.stderr or exc.stdout or "No mux diagnostic output").strip()
+     raise RuntimeError("Opuscar audio mux failed: "+detail[-3000:]) from None
    q=subprocess.run(["ffprobe","-v","error","-show_streams","-show_format","-of","json",str(master)],capture_output=True,text=True,check=True,timeout=15)
    info=json.loads(q.stdout);ss=info.get("streams",[]);v=next((s for s in ss if s.get("codec_type")=="video"),None);au=next((s for s in ss if s.get("codec_type")=="audio"),None)
    if not v or not au or (v.get("width"),v.get("height"))!=(p["width"],p["height"]):raise RuntimeError("Encoded MP4 stream/profile verification failed.")

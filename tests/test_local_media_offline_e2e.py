@@ -154,8 +154,8 @@ class OfflineLocalMediaEndToEndTests(unittest.TestCase):
             voice = {
                 "narration_text": script,
                 "captions_srt": (
-                    "1\\n00:00:00,000 --> 00:00:03,800\\nA small light appears.\\n\\n"
-                    "2\\n00:00:04,000 --> 00:00:07,800\\nThe signal becomes a path.\\n"
+                    "1\n00:00:00,000 --> 00:00:03,800\nA small light appears.\n\n"
+                    "2\n00:00:04,000 --> 00:00:07,800\nThe signal becomes a path.\n"
                 ),
             }
 

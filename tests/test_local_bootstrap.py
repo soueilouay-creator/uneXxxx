@@ -57,6 +57,7 @@ class LocalModelBootstrapTests(unittest.TestCase):
                     "sha256": expected,
                     "license_status": license_status,
                     "source_url": url,
+                    "source_revision": "0123456789abcdef0123456789abcdef01234567",
                     "size_bytes": len(payload),
                     "max_size_bytes": 1024,
                 }],

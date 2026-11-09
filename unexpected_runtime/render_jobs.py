@@ -63,7 +63,7 @@ def build_docker_command(input_dir:str|Path,output_dir:str|Path,*,image:str,limi
  cpus=max(1,min(4,(cpu+59)//60))
  return [docker_binary,"run","--rm","--network=none","--read-only","--user","10001:10001","--cap-drop=ALL",
  "--security-opt=no-new-privileges","--pids-limit","128","--memory",f"{mem}m","--cpus",str(cpus),
- "--tmpfs","/tmp:rw,nosuid,nodev,size=512m","--env","HOME=/tmp","--env","PLAYWRIGHT_BROWSERS_PATH=/ms-playwright",
+ "--tmpfs","/tmp:rw,nosuid,nodev,size=512m","--env","HOME=/tmp","--env","PLAYWRIGHT_BROWSERS_PATH=/ms-playwright","--env","LEMO_ANGLE=swiftshader",
  "--mount",f"type=bind,src={src},dst=/job/input,readonly","--mount",f"type=bind,src={dst},dst=/job/output",
  image,"--input-root","/job/input","--output-root","/job/output"]
 class DockerRenderDispatcher:

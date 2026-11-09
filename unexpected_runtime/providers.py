@@ -1,5 +1,5 @@
 from __future__ import annotations
-import json, os, urllib.error, urllib.request
+import ipaddress, json, os, urllib.error, urllib.request
 from urllib.parse import urlsplit
 from typing import Protocol
 
@@ -17,6 +17,88 @@ class DeterministicMockProvider:
         self.calls += 1
         self.requests.append({"system_prompt":system_prompt,"user_prompt":user_prompt,"agent_id":agent_id,"task_id":task_id})
         return f"MOCK_OK agent={agent_id} task={task_id}. This deterministic response verifies runtime plumbing only."
+
+class LocalOnlyProvider:
+    """OpenAI-compatible inference adapter restricted to a literal loopback IP.
+
+    No key, proxy, redirect, DNS lookup, or cloud fallback is used.
+    """
+    name = "local-llm"
+    configured = True
+    verified = False
+    retry_safe = False
+    local = True
+
+    def __init__(self, base_url: str, model: str, default_timeout: float = 120.0):
+        if not isinstance(base_url, str) or not base_url.strip():
+            raise ProviderError("Local inference requires a loopback base URL.")
+        if not isinstance(model, str) or not model.strip():
+            raise ProviderError("Local inference requires an explicit model name.")
+        try:
+            parsed = urlsplit(base_url.strip())
+            if (parsed.scheme != "http" or not parsed.hostname or parsed.username is not None
+                    or parsed.password is not None or parsed.query or parsed.fragment):
+                raise ValueError("unsafe local URL")
+            if parsed.hostname.lower() == "localhost":
+                raise ValueError("use a literal loopback IP to avoid name resolution")
+            address = ipaddress.ip_address(parsed.hostname)
+            if not address.is_loopback:
+                raise ValueError("host is not a loopback address")
+            if not 0 < float(default_timeout) <= 600:
+                raise ValueError("timeout outside allowed range")
+            path = parsed.path.rstrip("/") or "/v1"
+            if not path.endswith("/chat/completions"):
+                path += "/chat/completions"
+            self.endpoint = parsed._replace(path=path).geturl()
+        except (ValueError, TypeError):
+            raise ProviderError("Local inference URL must be HTTP on a literal loopback IP (127.0.0.1 or ::1), with no credentials, query or fragment.") from None
+        self.base_url = base_url.strip()
+        self.model = model.strip()
+        self.default_timeout = float(default_timeout)
+
+    def generate(self, *, system_prompt: str, user_prompt: str, agent_id: str, task_id: str, timeout: float) -> str:
+        try:
+            requested_timeout = float(timeout)
+        except (TypeError, ValueError):
+            raise ProviderError("Local inference timeout must be a positive number.") from None
+        if requested_timeout <= 0:
+            raise ProviderError("Local inference timeout must be a positive number.")
+        body = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "metadata": {"agent_id": agent_id, "task_id": task_id},
+        }
+        request = urllib.request.Request(
+            self.endpoint,
+            data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+            headers={"Content-Type": "application/json", "Accept": "application/json"},
+            method="POST",
+        )
+        try:
+            # Empty ProxyHandler mapping bypasses inherited HTTP(S)_PROXY variables.
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect())
+            with opener.open(request, timeout=min(requested_timeout, self.default_timeout)) as response:
+                raw = response.read(1_000_001)
+            if len(raw) > 1_000_000:
+                raise ProviderError("Local model response exceeded 1 MB.")
+            data = json.loads(raw.decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            raise ProviderError(f"Local model server rejected the request (HTTP {exc.code}).") from None
+        except ProviderError:
+            raise
+        except Exception as exc:
+            raise ProviderError(f"Local model request failed ({type(exc).__name__}); check the local runtime status.") from None
+        try:
+            text = data["choices"][0]["message"]["content"]
+            if not isinstance(text, str) or not text.strip():
+                raise ValueError("empty response")
+            return text.strip()
+        except (KeyError, IndexError, TypeError, ValueError):
+            raise ProviderError("Local model returned an unexpected chat-completions response schema.") from None
+
 
 class OpenAICompatibleProvider:
     name = "openai-compatible"
@@ -272,6 +354,8 @@ class ProviderRouter:
                 "model": getattr(provider, "model", None),
                 "default": route == self.default_route,
                 "live": route != "mock",
+                "local": bool(getattr(provider, "local", False)),
+                "external": route != "mock" and not bool(getattr(provider, "local", False)),
             })
         return items
 
@@ -324,7 +408,24 @@ class AIStudioGatewayProvider:
                 return f"[Live AI result: {item.get('label') or key}; model={item.get('model') or 'provider model'}]\n{item['text'].strip()}"
         raise ProviderError("Gateway returned no live provider response; simulated or failed output was rejected.")
 
+def _local_only_provider_from_env() -> LocalOnlyProvider:
+    legacy = os.getenv("UNEXPECTED_PROVIDER", "mock").strip().lower()
+    if legacy not in {"", "mock", "local", "llama.cpp", "llama_cpp"}:
+        raise ProviderError("Local-only mode rejects external or conflicting UNEXPECTED_PROVIDER selections.")
+    requested_default = os.getenv("UNEXPECTED_DEFAULT_PROVIDER", "").strip().lower()
+    if requested_default and requested_default != "local":
+        raise ProviderError("Local-only mode requires the local provider route; external defaults are disabled.")
+    return LocalOnlyProvider(
+        os.getenv("UNEXPECTED_LOCAL_BASE_URL", "http://127.0.0.1:8080/v1"),
+        os.getenv("UNEXPECTED_LOCAL_MODEL", ""),
+        float(os.getenv("UNEXPECTED_LOCAL_TIMEOUT_SECONDS", "120")),
+    )
+
+
 def provider_from_env():
+    ai_mode = os.getenv("UNEXPECTED_AI_MODE", "standard").strip().lower()
+    if ai_mode in {"local_only", "local-only"}: return _local_only_provider_from_env()
+    if ai_mode != "standard": raise ProviderError(f"Unsupported UNEXPECTED_AI_MODE: {ai_mode}")
     mode=os.getenv("UNEXPECTED_PROVIDER","mock").strip().lower()
     if mode=="mock": return DeterministicMockProvider()
     if mode in ("openai_compatible","openai-compatible"):
@@ -335,7 +436,12 @@ def provider_from_env():
 
 
 def provider_router_from_env() -> ProviderRouter:
-    """Build v8's native provider registry. The legacy gateway is not a production route."""
+    """Build v8's native provider registry; local-only mode never registers cloud routes."""
+    ai_mode = os.getenv("UNEXPECTED_AI_MODE", "standard").strip().lower()
+    if ai_mode in {"local_only", "local-only"}:
+        local_provider = _local_only_provider_from_env()
+        return ProviderRouter({"local": local_provider}, default_route="local")
+    if ai_mode != "standard": raise ProviderError(f"Unsupported UNEXPECTED_AI_MODE: {ai_mode}")
     legacy_mode = os.getenv("UNEXPECTED_PROVIDER", "mock").strip().lower()
     providers: dict[str, Provider] = {"mock": DeterministicMockProvider()}
 

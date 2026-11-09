@@ -32,6 +32,18 @@
       "notes": "Workflow runner, not an image model. Only reviewed local nodes and separately licensed weights may be enabled."
     },
     {
+      "model_id": "flux-1-schnell",
+      "task": "image",
+      "repository": "https://github.com/Comfy-Org/ComfyUI",
+      "revision": "fca60fe70e5b84c5c6b058263653d15cb3401e44",
+      "runtime": "ComfyUI local diffusion workflow",
+      "repository_license": "GPL-3.0",
+      "weight_license_status": "unverified",
+      "state": "discovered",
+      "weight_files": [],
+      "notes": "Image-generation candidate: FLUX.1-schnell weights are published separately under Apache-2.0 model terms. Weight source is black-forest-labs/FLUX.1-schnell; exact files, size, hardware and checksum are not yet pinned. Do not enable until those are reviewed."
+    },
+    {
       "model_id": "wan22-ti2v-5b",
       "task": "video",
       "repository": "https://github.com/Wan-Video/Wan2.2",

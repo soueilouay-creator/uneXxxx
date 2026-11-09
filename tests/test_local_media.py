@@ -81,6 +81,34 @@ class LocalMediaTests(unittest.TestCase):
                         motion_mode="illustrated_story",
                     )
 
+
+    def test_render_rejects_parent_symlink_before_reading_asset(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pipeline, *_ = self._fixture(root)
+            project = pipeline._project("12345678-abcd")
+            outside = root / "outside"
+            outside.mkdir()
+            (outside / "narration.wav").write_bytes(b"outside narration")
+            try:
+                (project / "linked").symlink_to(outside, target_is_directory=True)
+            except (OSError, NotImplementedError):
+                self.skipTest("Directory symlinks are unavailable on this platform.")
+            with patch("unexpected_runtime.local_media.shutil.which",
+                       side_effect=["/usr/bin/ffmpeg", "/usr/bin/ffprobe"]), \
+                 patch("unexpected_runtime.local_media._digest",
+                       side_effect=AssertionError("Escaping file must be rejected before it is read")) as digest:
+                with self.assertRaisesRegex(LocalMediaError, "symbolic link"):
+                    pipeline._render(
+                        "12345678-abcd", {}, [],
+                        {"images": [], "videos": [],
+                         "narration": {"path": "linked/narration.wav", "sha256": "0" * 64},
+                         "music": {"path": "music.wav", "sha256": "0" * 64}},
+                        "1\\n00:00:00,000 --> 00:00:01,000\\nTest.\\n",
+                        motion_mode="illustrated_story",
+                    )
+                digest.assert_not_called()
+
     def test_render_rejects_audio_assets_with_wrong_checksum(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -34,6 +34,33 @@ def _save(path, value):
         pass
     os.replace(temp, path)
 
+
+def _verified_project_file(root, relative_path, label):
+    """Resolve a regular project file without traversing symlinks or escaping root."""
+    if not isinstance(relative_path, str):
+        raise LocalMediaError(label + " asset path is invalid.")
+    relative = Path(relative_path)
+    if relative.is_absolute() or ".." in relative.parts or not relative.parts:
+        raise LocalMediaError(label + " asset path is unsafe.")
+    base = Path(root).resolve()
+    candidate = base / relative
+    cursor = base
+    for part in relative.parts:
+        cursor = cursor / part
+        if cursor.is_symlink():
+            raise LocalMediaError(label + " asset path contains a symbolic link.")
+    try:
+        resolved = candidate.resolve(strict=True)
+        resolved.relative_to(base)
+    except ValueError:
+        raise LocalMediaError(label + " asset escapes its project directory.") from None
+    except (OSError, RuntimeError):
+        raise LocalMediaError(label + " asset is missing or unsafe.") from None
+    if not resolved.is_file():
+        raise LocalMediaError(label + " asset is not a regular file.")
+    return resolved
+
+
 class LocalMediaPipeline:
     """Local ComfyUI media stages with durable queue IDs and output checksums."""
     def __init__(self, *, config_path, registry_path, model_root, work_root,
@@ -119,8 +146,11 @@ class LocalMediaPipeline:
         elif not isinstance(digest, str) or not SHA.fullmatch(digest):
             problems.append("workflow hash must be pinned")
         else:
-            path = workflow_root / file
-            if path.is_symlink() or not path.is_file() or _digest(path) != digest:
+            try:
+                path = _verified_project_file(workflow_root, file, "Workflow")
+                if _digest(path) != digest:
+                    problems.append("workflow missing, unsafe or checksum-mismatched")
+            except LocalMediaError:
                 problems.append("workflow missing, unsafe or checksum-mismatched")
         nodes, bindings = spec.get("allowed_node_types"), spec.get("input_bindings")
         if not isinstance(nodes, list) or not nodes or len(nodes) > 128:
@@ -217,8 +247,8 @@ class LocalMediaPipeline:
         if record and (record.get("prompt_sha256") != prompt_hash or record.get("workflow_sha256") != workflow_hash):
             raise LocalMediaError("Asset key reused with different prompt or workflow.")
         if record.get("status") == "completed":
-            cached = project / record["path"]
-            if cached.is_symlink() or not cached.is_file() or _digest(cached) != record["sha256"]:
+            cached = _verified_project_file(project, record.get("path"), "Cached")
+            if _digest(cached) != record.get("sha256"):
                 raise LocalMediaError("Cached asset checksum mismatch.")
             return {**record, "status": "reused"}
         if record.get("status") == "queued":
@@ -249,7 +279,12 @@ class LocalMediaPipeline:
                 selected = (path, item); break
         if selected is None: raise LocalMediaError("ComfyUI returned no supported " + task + " output.")
         path, item = selected
-        if path.is_symlink() or not path.is_file() or path.stat().st_size < 1024:
+        try:
+            relative_output = path.relative_to(project).as_posix()
+        except ValueError:
+            raise LocalMediaError("Generated asset escapes its project directory.") from None
+        path = _verified_project_file(project, relative_output, "Generated")
+        if path.stat().st_size < 1024:
             raise LocalMediaError("Generated asset is unsafe or too small.")
         completed = {"status": "completed", "task": task, "path": str(path.resolve().relative_to(project)),
             "sha256": _digest(path), "byte_size": path.stat().st_size,
@@ -285,16 +320,9 @@ class LocalMediaPipeline:
     def _procedural_motion_asset(self, project_id, scene_id, image_asset, duration_seconds, project):
         """Create labelled, deterministic motion from a verified local still when no video model fits."""
         root = self._project(project_id)
-        relative = Path(image_asset.get("path", ""))
-        if relative.is_absolute() or ".." in relative.parts or not relative.parts:
-            raise LocalMediaError("Storyboard image path is unsafe.")
-        still = root / relative
-        if still.is_symlink() or not still.is_file() or _digest(still) != image_asset.get("sha256"):
+        still = _verified_project_file(root, image_asset.get("path"), "Storyboard image")
+        if _digest(still) != image_asset.get("sha256"):
             raise LocalMediaError("Procedural motion requires a checksum-verified storyboard still.")
-        try:
-            still.resolve().relative_to(root.resolve())
-        except ValueError:
-            raise LocalMediaError("Storyboard image escapes its project directory.") from None
         duration = float(duration_seconds)
         if not math.isfinite(duration) or not 2 <= duration <= 180:
             raise LocalMediaError("Procedural motion duration is invalid.")
@@ -465,16 +493,9 @@ class LocalMediaPipeline:
         def verified_asset_path(asset, label):
             if not isinstance(asset, dict) or not isinstance(asset.get("path"), str):
                 raise LocalMediaError(label + " asset metadata is invalid.")
-            relative = Path(asset["path"])
-            if relative.is_absolute() or ".." in relative.parts or not relative.parts:
-                raise LocalMediaError(label + " asset path is unsafe.")
-            path = root / relative
-            if path.is_symlink() or not path.is_file() or _digest(path) != asset.get("sha256"):
+            path = _verified_project_file(root, asset["path"], label)
+            if _digest(path) != asset.get("sha256"):
                 raise LocalMediaError(label + " asset failed checksum verification.")
-            try:
-                path.resolve().relative_to(root.resolve())
-            except ValueError:
-                raise LocalMediaError(label + " asset escapes its project directory.") from None
             return path
 
         image_assets = assets.get("images", [])
@@ -496,7 +517,15 @@ class LocalMediaPipeline:
         if abs(sum(scene["duration_seconds"] for scene in scenes) - duration) > 1.5:
             raise LocalMediaError("Scene timing does not cover the narration.")
         segment_dir = root / "segments"
+        if segment_dir.is_symlink():
+            raise LocalMediaError("Segment directory cannot be a symbolic link.")
         segment_dir.mkdir(exist_ok=True)
+        try:
+            segment_dir.resolve(strict=True).relative_to(root.resolve())
+        except (OSError, ValueError, RuntimeError):
+            raise LocalMediaError("Segment directory escapes its project directory.") from None
+        if not segment_dir.is_dir():
+            raise LocalMediaError("Segment directory is not a directory.")
         concat_lines = ["ffconcat version 1.0"]
         for index, (scene, image_asset, asset) in enumerate(zip(scenes, image_assets, video_assets)):
             still = verified_asset_path(image_asset, "Storyboard image")
@@ -524,6 +553,8 @@ class LocalMediaPipeline:
                 raise LocalMediaError("A normalized video segment failed file verification.")
             concat_lines.append("file 'segments/" + segment_name + "'")
         concat = root / "segments.ffconcat"
+        if concat.is_symlink():
+            raise LocalMediaError("Segment manifest cannot be a symbolic link.")
         concat.write_text("\n".join(concat_lines) + "\n", encoding="utf-8")
         output = root / "master.mp4"
         if output.is_symlink():

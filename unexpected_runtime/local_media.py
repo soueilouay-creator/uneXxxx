@@ -238,4 +238,161 @@ class LocalMediaPipeline:
         _save(state_path, state)
         return completed
 
+
+
+    @staticmethod
+    def _json_output(value, label):
+        if not isinstance(value, str) or not value.strip():
+            raise LocalMediaError(label + " output is empty.")
+        raw = value.strip()
+        fence = chr(96) * 3
+        if raw.startswith(fence):
+            raw = raw[len(fence):]
+            if raw.lower().startswith("json"):
+                raw = raw[4:]
+            raw = raw.strip()
+            if raw.endswith(fence):
+                raw = raw[:-len(fence)].strip()
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            raise LocalMediaError(label + " output must be strict JSON.") from None
+        if not isinstance(data, dict):
+            raise LocalMediaError(label + " output must be a JSON object.")
+        return data
+
+    def produce(self, project_id, project, storyboard_text, narration_text):
+        if os.getenv("UNEXPECTED_AI_MODE", "").lower() not in {"local_only", "local-only"}:
+            raise LocalMediaError("Production requires UNEXPECTED_AI_MODE=local_only.")
+        storyboard = self._json_output(storyboard_text, "Storyboard")
+        voice = self._json_output(narration_text, "Voice")
+        script = storyboard.get("narration_script")
+        spoken = voice.get("narration_text")
+        captions = voice.get("captions_srt")
+        music_prompt = storyboard.get("music_prompt")
+        scenes = storyboard.get("scenes")
+        if not isinstance(script, str) or not script.strip() or spoken != script:
+            raise LocalMediaError("Voice narration must exactly match the storyboard script.")
+        if not isinstance(captions, str) or not captions.strip() or len(captions.encode("utf-8")) > 2000000:
+            raise LocalMediaError("Voice stage must return a bounded SRT caption file.")
+        if not isinstance(music_prompt, str) or not music_prompt.strip():
+            raise LocalMediaError("Storyboard must include an original local music prompt.")
+        if not isinstance(scenes, list) or not 2 <= len(scenes) <= 120:
+            raise LocalMediaError("Storyboard must contain 2–120 structured scenes.")
+        assets = {"images": [], "videos": []}
+        checked_scenes = []
+        for index, scene in enumerate(scenes, 1):
+            if not isinstance(scene, dict):
+                raise LocalMediaError("Storyboard scenes must be objects.")
+            scene_id = scene.get("scene_id", "scene-" + str(index).zfill(3))
+            image_prompt, motion_prompt = scene.get("visual_prompt"), scene.get("motion_prompt")
+            duration = scene.get("duration_seconds")
+            if (not isinstance(scene_id, str) or not IDENT.fullmatch(scene_id)
+                    or not isinstance(image_prompt, str) or not image_prompt.strip()
+                    or not isinstance(motion_prompt, str) or not motion_prompt.strip()
+                    or isinstance(duration, bool) or not isinstance(duration, (int, float))
+                    or not math.isfinite(float(duration)) or not 2 <= float(duration) <= 180):
+                raise LocalMediaError("Storyboard scene " + str(index) + " is invalid.")
+            checked_scenes.append({"scene_id": scene_id, "duration_seconds": float(duration)})
+            assets["images"].append(self.generate_asset("image", project_id, scene_id, image_prompt))
+            assets["videos"].append(self.generate_asset("video", project_id, scene_id, motion_prompt))
+        assets["narration"] = self.generate_asset("tts", project_id, "narration", spoken)
+        assets["music"] = self.generate_asset("music", project_id, "soundtrack", music_prompt)
+        render = self._render(project_id, project, checked_scenes, assets, captions)
+        passed = render["qa"].get("status") == "passed"
+        return {"status": "completed" if passed else "qa_failed", "project_id": project_id,
+                "provider_route": "local", "assets": assets, "render": render,
+                "video_rendered": True, "qa_passed": passed,
+                "publishing_performed": False, "external_ai_api": "disabled"}
+
+    def _run_local(self, command, cwd, timeout=900):
+        env = {"PATH": os.environ.get("PATH", os.defpath), "HOME": str(Path.home()),
+               "TMP": os.environ.get("TMP", "/tmp"), "TEMP": os.environ.get("TEMP", "/tmp"),
+               "UNEXPECTED_AI_MODE": "local_only", "HF_HUB_OFFLINE": "1",
+               "TRANSFORMERS_OFFLINE": "1", "DO_NOT_TRACK": "1",
+               "NO_PROXY": "127.0.0.1,localhost,::1", "no_proxy": "127.0.0.1,localhost,::1"}
+        try:
+            result = subprocess.run(command, cwd=str(cwd), env=env, shell=False,
+                capture_output=True, text=True, timeout=max(10, min(int(timeout), 3600)),
+                check=False)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise LocalMediaError("Offline media command failed (" + type(exc).__name__ + ").") from None
+        if result.returncode:
+            lines = (result.stderr or result.stdout or "local renderer failed").strip().splitlines()
+            raise LocalMediaError((lines[-1] if lines else "local renderer failed")[:400])
+        return result
+
+    def _render(self, project_id, project, scenes, assets, captions):
+        ffmpeg, ffprobe = shutil.which("ffmpeg"), shutil.which("ffprobe")
+        if not ffmpeg or not ffprobe:
+            raise LocalMediaError("Local FFmpeg and ffprobe are required.")
+        root = self._project(project_id)
+        caption_file = root / "captions.srt"
+        if caption_file.is_symlink():
+            raise LocalMediaError("Caption file cannot be a symbolic link.")
+        caption_file.write_text(captions, encoding="utf-8")
+        channels = project.get("channel_profile", {})
+        youtube = channels.get("youtube", {}) if isinstance(channels, dict) else {}
+        wide = isinstance(youtube, dict) and (youtube.get("format") == "longform" or youtube.get("aspect_ratio") == "16:9")
+        width, height = (1920, 1080) if wide else (1080, 1920)
+        narration = root / assets["narration"]["path"]
+        music = root / assets["music"]["path"]
+        probe = self._run_local([ffprobe, "-v", "error", "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1", str(narration)], root, 30)
+        try:
+            duration = float(probe.stdout.strip())
+        except ValueError:
+            raise LocalMediaError("Narration duration could not be read.") from None
+        if not math.isfinite(duration) or not 5 <= duration <= 3600:
+            raise LocalMediaError("Narration duration is outside supported bounds.")
+        if abs(sum(scene["duration_seconds"] for scene in scenes) - duration) > 1.5:
+            raise LocalMediaError("Scene timing does not cover the narration.")
+        segment_dir = root / "segments"
+        segment_dir.mkdir(exist_ok=True)
+        concat_lines = ["ffconcat version 1.0"]
+        for index, (scene, asset) in enumerate(zip(scenes, assets["videos"])):
+            source = root / asset["path"]
+            if source.is_symlink() or not source.is_file() or _digest(source) != asset["sha256"]:
+                raise LocalMediaError("A generated video segment failed checksum verification.")
+            segment_name = "segment-" + str(index).zfill(3) + ".mp4"
+            target = segment_dir / segment_name
+            if target.is_symlink():
+                raise LocalMediaError("A video segment cannot be a symbolic link.")
+            self._run_local([ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+                "-stream_loop", "-1", "-i", str(source), "-t", str(scene["duration_seconds"]),
+                "-an", "-vf", f"fps=24,scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},setsar=1,format=yuv420p",
+                "-r", "24", "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
+                "-pix_fmt", "yuv420p", str(target)], root, 900)
+            if not target.is_file() or target.stat().st_size < 4096:
+                raise LocalMediaError("A normalized video segment failed file verification.")
+            concat_lines.append("file 'segments/" + segment_name + "'")
+        concat = root / "segments.ffconcat"
+        concat.write_text("\n".join(concat_lines) + "\n", encoding="utf-8")
+        for audio in (narration, music):
+            if audio.is_symlink() or not audio.is_file():
+                raise LocalMediaError("Narration or music asset is missing.")
+        output = root / "master.mp4"
+        if output.is_symlink():
+            raise LocalMediaError("Master MP4 cannot be a symbolic link.")
+        if output.exists():
+            output = root / ("master-" + str(int(time.time())) + ".mp4")
+        self._run_local([ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "concat", "-safe", "0", "-i", str(concat), "-i", str(narration),
+            "-stream_loop", "-1", "-i", str(music), "-filter_complex",
+            "[1:a]volume=1.0[n];[2:a]volume=0.13[m];[n][m]amix=inputs=2:duration=first:dropout_transition=2,loudnorm=I=-14:TP=-1.2:LRA=11[a]",
+            "-map", "0:v:0", "-map", "[a]", "-vf",
+            "subtitles=captions.srt:force_style='FontName=DejaVu Sans,FontSize=34,Outline=2,Shadow=1,MarginV=72,Alignment=2'",
+            "-t", format(duration, ".3f"), "-r", "24", "-c:v", "libx264", "-preset",
+            "veryfast", "-crf", "22", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k",
+            "-movflags", "+faststart", str(output)], root, 1800)
+        from .creator_qa import CreatorVideoQA, CreatorVideoQAError
+        try:
+            qa = CreatorVideoQA(ffmpeg=ffmpeg, ffprobe=ffprobe, timeout_seconds=600).inspect(
+                output, captions_path=caption_file, motion_mode="full_motion")
+        except CreatorVideoQAError as exc:
+            raise LocalMediaError("Encoded local MP4 failed media QA (" + type(exc).__name__ + ").") from None
+        return {"path": str(output.relative_to(root)), "sha256": qa["sha256"],
+                "byte_size": qa["byte_size"], "profile": "youtube_longform" if wide else "youtube_shorts",
+                "width": width, "height": height, "fps": 24, "qa": qa}
+
 __all__ = ["LocalMediaPipeline", "LocalMediaError"]

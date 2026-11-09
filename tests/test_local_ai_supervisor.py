@@ -30,11 +30,13 @@ class LocalAISupervisorTests(unittest.TestCase):
     def test_intel_graphics_is_reported_without_assuming_acceleration_memory(self):
         intel = [{"name": "Intel UHD Graphics", "memory_bytes": 0,
                   "vendor": "intel", "memory_reported": False}]
-        with patch("unexpected_runtime.local_ai_supervisor._nvidia_devices", return_value=[]), \\
-             patch("unexpected_runtime.local_ai_supervisor._rocm_devices", return_value=[]), \\
-             patch("unexpected_runtime.local_ai_supervisor._mac_devices", return_value=[]), \\
-             patch("unexpected_runtime.local_ai_supervisor._intel_devices", return_value=intel), \\
-             patch("unexpected_runtime.local_ai_supervisor._ram_bytes", return_value=16 * 1024**3):
+        with (
+            patch("unexpected_runtime.local_ai_supervisor._nvidia_devices", return_value=[]),
+            patch("unexpected_runtime.local_ai_supervisor._rocm_devices", return_value=[]),
+            patch("unexpected_runtime.local_ai_supervisor._mac_devices", return_value=[]),
+            patch("unexpected_runtime.local_ai_supervisor._intel_devices", return_value=intel),
+            patch("unexpected_runtime.local_ai_supervisor._ram_bytes", return_value=16 * 1024**3),
+        ):
             report = detect_hardware()
         self.assertEqual(report["gpu_count"], 1)
         self.assertEqual(report["gpus"][0]["vendor"], "intel")

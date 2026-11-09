@@ -124,6 +124,51 @@ class LocalAISupervisorTests(unittest.TestCase):
             with self.assertRaises(LocalSupervisorError):
                 supervisor._read_config()
 
+    def test_ready_to_generate_requires_all_core_models_and_both_local_services(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            supervisor = LocalAISupervisor(
+                model_root=root / "models",
+                registry_path=root / "registry.json",
+                config_path=root / "runtime_config.json",
+                state_dir=root / "state",
+            )
+            registry = {"models": [
+                {"model_id": "text-model", "task": "llm"},
+                {"model_id": "image-model", "task": "image"},
+                {"model_id": "voice-model", "task": "tts"},
+                {"model_id": "music-model", "task": "music"},
+                {"model_id": "video-model", "task": "video"},
+            ]}
+            hardware = {"hardware_candidate_tasks": ["llm", "image", "tts", "music", "video", "asr"]}
+            config = {"services": {"llm": {}, "comfyui": {}}}
+
+            def report_for(available):
+                return {"models": [
+                    {"model_id": item["model_id"], "available": item["model_id"] in available}
+                    for item in registry["models"]
+                ]}
+
+            with patch("unexpected_runtime.local_ai_supervisor.detect_hardware", return_value=hardware), \
+                 patch("unexpected_runtime.local_ai_supervisor.inspect_local_ai", return_value=report_for({"text-model"})), \
+                 patch.object(supervisor, "_registry", return_value=registry), \
+                 patch.object(supervisor, "_read_config", return_value=config), \
+                 patch.object(supervisor, "_service_check", return_value={"service": "llm", "ready": True}):
+                report = supervisor.preflight()
+            self.assertFalse(report["ready_to_generate"])
+            self.assertEqual(report["pipeline_readiness"]["missing_model_tasks"],
+                             ["image", "music", "tts", "video"])
+
+            all_available = {item["model_id"] for item in registry["models"]}
+            with patch("unexpected_runtime.local_ai_supervisor.detect_hardware", return_value=hardware), \
+                 patch("unexpected_runtime.local_ai_supervisor.inspect_local_ai", return_value=report_for(all_available)), \
+                 patch.object(supervisor, "_registry", return_value=registry), \
+                 patch.object(supervisor, "_read_config", return_value=config), \
+                 patch.object(supervisor, "_service_check", side_effect=lambda name, spec, reg: {"service": name, "ready": True}):
+                report = supervisor.preflight()
+            self.assertTrue(report["ready_to_generate"])
+            self.assertEqual(report["pipeline_readiness"]["missing_services"], [])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

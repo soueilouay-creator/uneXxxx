@@ -170,5 +170,47 @@ class LocalAISupervisorTests(unittest.TestCase):
             self.assertEqual(report["pipeline_readiness"]["missing_services"], [])
 
 
+    def test_illustrated_story_fallback_removes_native_video_model_from_readiness_gate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            supervisor = LocalAISupervisor(
+                model_root=root / "models",
+                registry_path=root / "registry.json",
+                config_path=root / "runtime_config.json",
+                state_dir=root / "state",
+            )
+            media_config = root / "media_workflows.json"
+            media_config.write_text(json.dumps({
+                "schema_version": 1,
+                "tasks": {},
+                "video_fallback": "illustrated_story",
+            }), encoding="utf-8")
+            registry = {"models": [
+                {"model_id": "text-model", "task": "llm"},
+                {"model_id": "image-model", "task": "image"},
+                {"model_id": "voice-model", "task": "tts"},
+                {"model_id": "music-model", "task": "music"},
+                {"model_id": "video-model", "task": "video"},
+            ]}
+            hardware = {"hardware_candidate_tasks": ["llm", "image", "tts", "music", "asr"]}
+            config = {"services": {"llm": {}, "comfyui": {}}}
+            available = {"text-model", "image-model", "voice-model", "music-model"}
+            model_report = {"models": [
+                {"model_id": item["model_id"], "available": item["model_id"] in available}
+                for item in registry["models"]
+            ]}
+            with patch.dict(os.environ, {"UNEXPECTED_MEDIA_WORKFLOWS": str(media_config)}), \\
+                 patch("unexpected_runtime.local_ai_supervisor.detect_hardware", return_value=hardware), \\
+                 patch("unexpected_runtime.local_ai_supervisor.inspect_local_ai", return_value=model_report), \\
+                 patch.object(supervisor, "_registry", return_value=registry), \\
+                 patch.object(supervisor, "_read_config", return_value=config), \\
+                 patch.object(supervisor, "_service_check", side_effect=lambda name, spec, reg: {"service": name, "ready": True}):
+                report = supervisor.preflight()
+            self.assertTrue(report["ready_to_generate"])
+            self.assertEqual(report["video_fallback_mode"], "illustrated_story")
+            self.assertNotIn("video", report["pipeline_readiness"]["required_model_tasks"])
+            self.assertFalse(next(item for item in report["model_tasks"] if item["task"] == "video")["ready"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

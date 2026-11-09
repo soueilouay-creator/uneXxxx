@@ -461,8 +461,30 @@ class LocalMediaPipeline:
         youtube = channels.get("youtube", {}) if isinstance(channels, dict) else {}
         wide = isinstance(youtube, dict) and (youtube.get("format") == "longform" or youtube.get("aspect_ratio") == "16:9")
         width, height = (1920, 1080) if wide else (1080, 1920)
-        narration = root / assets["narration"]["path"]
-        music = root / assets["music"]["path"]
+
+        def verified_asset_path(asset, label):
+            if not isinstance(asset, dict) or not isinstance(asset.get("path"), str):
+                raise LocalMediaError(label + " asset metadata is invalid.")
+            relative = Path(asset["path"])
+            if relative.is_absolute() or ".." in relative.parts or not relative.parts:
+                raise LocalMediaError(label + " asset path is unsafe.")
+            path = root / relative
+            if path.is_symlink() or not path.is_file() or _digest(path) != asset.get("sha256"):
+                raise LocalMediaError(label + " asset failed checksum verification.")
+            try:
+                path.resolve().relative_to(root.resolve())
+            except ValueError:
+                raise LocalMediaError(label + " asset escapes its project directory.") from None
+            return path
+
+        image_assets = assets.get("images", [])
+        video_assets = assets.get("videos", [])
+        if not isinstance(image_assets, list) or not isinstance(video_assets, list):
+            raise LocalMediaError("Storyboard image and video assets must be lists.")
+        if len(image_assets) != len(scenes) or len(video_assets) != len(scenes):
+            raise LocalMediaError("Every scene requires one verified image and one verified video segment.")
+        narration = verified_asset_path(assets.get("narration"), "Narration")
+        music = verified_asset_path(assets.get("music"), "Music")
         probe = self._run_local([ffprobe, "-v", "error", "-show_entries", "format=duration",
             "-of", "default=noprint_wrappers=1:nokey=1", str(narration)], root, 30)
         try:
@@ -476,16 +498,9 @@ class LocalMediaPipeline:
         segment_dir = root / "segments"
         segment_dir.mkdir(exist_ok=True)
         concat_lines = ["ffconcat version 1.0"]
-        image_assets = assets.get("images", [])
-        if len(image_assets) != len(scenes):
-            raise LocalMediaError("Every scene requires one verified storyboard image.")
-        for index, (scene, image_asset, asset) in enumerate(zip(scenes, image_assets, assets["videos"])):
-            still = root / image_asset["path"]
-            if still.is_symlink() or not still.is_file() or _digest(still) != image_asset["sha256"]:
-                raise LocalMediaError("A storyboard image failed checksum verification.")
-            source = root / asset["path"]
-            if source.is_symlink() or not source.is_file() or _digest(source) != asset["sha256"]:
-                raise LocalMediaError("A generated video segment failed checksum verification.")
+        for index, (scene, image_asset, asset) in enumerate(zip(scenes, image_assets, video_assets)):
+            still = verified_asset_path(image_asset, "Storyboard image")
+            source = verified_asset_path(asset, "Generated video segment")
             segment_name = "segment-" + str(index).zfill(3) + ".mp4"
             target = segment_dir / segment_name
             if target.is_symlink():
@@ -510,9 +525,6 @@ class LocalMediaPipeline:
             concat_lines.append("file 'segments/" + segment_name + "'")
         concat = root / "segments.ffconcat"
         concat.write_text("\n".join(concat_lines) + "\n", encoding="utf-8")
-        for audio in (narration, music):
-            if audio.is_symlink() or not audio.is_file():
-                raise LocalMediaError("Narration or music asset is missing.")
         output = root / "master.mp4"
         if output.is_symlink():
             raise LocalMediaError("Master MP4 cannot be a symbolic link.")

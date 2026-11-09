@@ -23,6 +23,17 @@ class CreatorVideoQA:
   if not i or not p: raise CreatorVideoQAError("FFmpeg ebur128 did not report summary loudness and true peak.")
   return {"integrated_lufs":float(i.group(1)),"true_peak_dbfs":float(p.group(1))}
  @staticmethod
+ def validate_stream_durations(video_duration,audio_duration,format_duration,tolerance=.25):
+  values=(video_duration,audio_duration,format_duration)
+  if any(not isinstance(x,(int,float)) or not math.isfinite(x) or x<=0 for x in values):
+   raise CreatorVideoQAError("MP4 stream durations must be finite and positive.")
+  if any(abs(x-format_duration)>tolerance for x in (video_duration,audio_duration)):
+   raise CreatorVideoQAError("MP4 audio and video stream durations must match the container duration.")
+  if abs(video_duration-audio_duration)>tolerance:
+   raise CreatorVideoQAError("MP4 audio and video stream durations do not match.")
+  return {"video_seconds":round(video_duration,3),"audio_seconds":round(audio_duration,3),
+          "container_seconds":round(format_duration,3),"tolerance_seconds":tolerance}
+ @staticmethod
  def parse_caption_file(path,duration):
   f=Path(path)
   if not f.is_file() or f.stat().st_size>2_000_000: raise CreatorVideoQAError("Caption file is missing or too large.")
@@ -59,8 +70,16 @@ class CreatorVideoQA:
   if p.returncode: raise CreatorVideoQAError("ffprobe could not inspect the MP4.")
   try: data=json.loads(p.stdout)
   except ValueError as e: raise CreatorVideoQAError("ffprobe returned invalid JSON.") from e
-  s=data.get("streams",[]);v=next((x for x in s if x.get("codec_type")=="video"),None);a=next((x for x in s if x.get("codec_type")=="audio"),None);duration=float(data.get("format",{}).get("duration") or 0)
+  s=data.get("streams",[]);v=next((x for x in s if x.get("codec_type")=="video"),None);a=next((x for x in s if x.get("codec_type")=="audio"),None)
+  try: duration=float(data.get("format",{}).get("duration") or 0)
+  except (TypeError,ValueError): duration=0
   if not v or not a or not math.isfinite(duration) or duration<=0: raise CreatorVideoQAError("MP4 must contain video, audio and finite duration.")
+  try:
+   video_duration=float(v.get("duration") or duration)
+   audio_duration=float(a.get("duration") or duration)
+  except (TypeError,ValueError):
+   raise CreatorVideoQAError("MP4 stream duration could not be read.") from None
+  stream_durations=self.validate_stream_durations(video_duration,audio_duration,duration)
   w,h=int(v.get("width") or 0),int(v.get("height") or 0)
   profiles={(1080,1920):"9:16",(1920,1080):"16:9"}
   if (w,h) not in profiles: raise CreatorVideoQAError("Master must be 1080x1920 vertical or 1920x1080 landscape.")
@@ -75,13 +94,13 @@ class CreatorVideoQA:
   l=self._run([self.ffmpeg,"-hide_banner","-nostats","-i",str(f),"-vn","-af","ebur128=peak=true","-f","null","-"])
   if l.returncode: raise CreatorVideoQAError("FFmpeg audio analysis failed.")
   levels=self.parse_loudness(l.stderr+"\n"+l.stdout);caps=self.parse_caption_file(captions_path,duration) if captions_path else None
-  checks={"dimensions":{"status":"passed","width":w,"height":h},"duration":{"status":"passed","seconds":round(duration,3)},"frame_rate":{"status":"passed","fps":round(fps,3)},
+  checks={"dimensions":{"status":"passed","width":w,"height":h},"duration":{"status":"passed","seconds":round(duration,3)},"stream_durations":{"status":"passed",**stream_durations},"frame_rate":{"status":"passed","fps":round(fps,3)},
    "audio_stream":{"status":"passed","codec":a.get("codec_name")},"black_frames":{"status":"passed" if defects["black_longest_seconds"]<=.35 else "failed",**defects},
    "freezes":{"status":"human_review_required" if motion_mode=="illustrated_story" else ("passed" if defects["freeze_longest_seconds"]<1 else "failed"),"longest_seconds":defects["freeze_longest_seconds"]},
    "audio_loudness":{"status":"passed" if -16<=levels["integrated_lufs"]<=-12 and levels["true_peak_dbfs"]<=-1 else "failed",**levels},
    "captions":{"status":caps["status"] if caps else "failed",**(caps or {"reason":"Caption sidecar is required."})},
    "transitions":{"status":"human_review_required"},"narration_sync":{"status":"human_review_required"}}
-  keys=("dimensions","duration","frame_rate","audio_stream","black_frames","audio_loudness","captions") if motion_mode=="illustrated_story" else ("dimensions","duration","frame_rate","audio_stream","black_frames","freezes","audio_loudness","captions")
+  keys=("dimensions","duration","stream_durations","frame_rate","audio_stream","black_frames","audio_loudness","captions") if motion_mode=="illustrated_story" else ("dimensions","duration","stream_durations","frame_rate","audio_stream","black_frames","freezes","audio_loudness","captions")
   return {"status":"passed" if all(checks[k]["status"]=="passed" for k in keys) else "failed","file":f.name,"sha256":hashlib.sha256(f.read_bytes()).hexdigest(),"byte_size":f.stat().st_size,
    "media":{"width":w,"height":h,"aspect_ratio":profiles[(w,h)],"duration_seconds":round(duration,3),"fps":round(fps,3),"video_codec":v.get("codec_name"),"audio_codec":a.get("codec_name")},"checks":checks,"motion_mode":motion_mode,"human_review_required":True}
 __all__=["CreatorVideoQA","CreatorVideoQAError"]

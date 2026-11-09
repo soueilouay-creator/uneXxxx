@@ -27,7 +27,7 @@ RUN git init /opt/lemo-opuscar \
 COPY renderer/worker.py renderer/story_film.py /app/
 RUN groupadd --gid 10001 creator && useradd --uid 10001 --gid 10001 --home-dir /tmp/creator --no-create-home --shell /usr/sbin/nologin creator \
  && chmod 0555 /app/worker.py && chown -R root:root /opt/lemo-opuscar /app
-ENV LEMO_OPUSCAR_HOME=/opt/lemo-opuscar HOME=/tmp PLAYWRIGHT_BROWSERS_PATH=/ms-playwright PYTHONDONTWRITEBYTECODE=1
+ENV LEMO_OPUSCAR_HOME=/opt/lemo-opuscar HOME=/tmp PLAYWRIGHT_BROWSERS_PATH=/ms-playwright LEMO_ANGLE=swiftshader PYTHONDONTWRITEBYTECODE=1
 WORKDIR /job
 USER 10001:10001
 ENTRYPOINT ["python3","/app/worker.py"]

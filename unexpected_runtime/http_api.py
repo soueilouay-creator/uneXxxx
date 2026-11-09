@@ -373,11 +373,12 @@ def create_server(*, coordinator=None, api_token=None, host="127.0.0.1", port=0)
             route=urlsplit(self.path).path
             if route == "/mcp":
                 return self.handle_mcp_post()
-            creator_match=re.fullmatch(r"/v1/creator/projects/([0-9a-fA-F-]{36})/(versions|render-jobs)",route)
+            creator_match=re.fullmatch(r"/v1/creator/projects/([0-9a-fA-F-]{36})/(versions|render-jobs|produce)",route)
             is_creator_project=route=="/v1/creator/projects"
             is_creator_version=bool(creator_match and creator_match.group(2)=="versions")
             is_creator_render=bool(creator_match and creator_match.group(2)=="render-jobs")
-            is_creator=is_creator_project or is_creator_version or is_creator_render
+            is_creator_produce=bool(creator_match and creator_match.group(2)=="produce")
+            is_creator=is_creator_project or is_creator_version or is_creator_render or is_creator_produce
             if route not in {"/v1/invoke", "/v1/lifecycle", "/v1/providers/test", "/v1/improvements/propose", "/v1/quality-evaluations", "/v1/subagents/run"} and not is_creator: return self.send_json(404,{"error":"Not found."})
             is_lifecycle=route=="/v1/lifecycle"
             is_provider_test=route=="/v1/providers/test"
@@ -400,6 +401,21 @@ def create_server(*, coordinator=None, api_token=None, host="127.0.0.1", port=0)
                     from .creator_studio import CreatorStudioError
                     if isinstance(exc,CreatorStudioError): return self.send_json(400,{"error":str(exc)})
                     return self.send_json(500,{"error":"Creator Studio project creation failed."})
+            if is_creator_produce:
+                allowed={"resume"}
+                if set(body)-allowed or ("resume" in body and not isinstance(body["resume"], bool)):
+                    return self.send_json(400,{"error":"Creator Team accepts only a boolean resume field."})
+                if os.getenv("UNEXPECTED_AI_MODE", "standard").strip().lower() not in {"local_only", "local-only"}:
+                    return self.send_json(409,{"blocked":True,"error":"Creator Team requires UNEXPECTED_AI_MODE=local_only."})
+                try:
+                    result=active.creator_team.run(creator_match.group(1),actor="command-center-api",
+                                                   resume=body.get("resume",True))
+                    return self.send_json(200,{"result":result})
+                except Exception as exc:
+                    from .creator_team import CreatorTeamError
+                    if isinstance(exc,CreatorTeamError):
+                        return self.send_json(409,{"blocked":True,"error":str(exc)})
+                    return self.send_json(500,{"error":"Local Creator Team execution failed."})
             if is_creator_version:
                 allowed={"kind","content","parent_version_id"}
                 if set(body)-allowed: return self.send_json(400,{"error":"Unsupported Creator Studio version fields."})

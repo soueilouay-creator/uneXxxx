@@ -33,6 +33,8 @@ class Coordinator:
             raise RuntimeError('UNEXPECTED_STORAGE_BACKEND must be sqlite or postgres.')
         from .creator_studio import CreatorStudioService
         self.creator_studio=CreatorStudioService(self.store)
+        from .creator_team import CreatorTeamRunner
+        self.creator_team=CreatorTeamRunner(self)
         self.creator_recovery=self.creator_studio.recover_interrupted_jobs()
         self.provider=provider or provider_router_from_env()
         self.skills=SkillRegistry.load(skill_manifest_path, skill_package_root)

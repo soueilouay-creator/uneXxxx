@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 MODEL_STATES = {"discovered", "reviewed", "download-approved", "cached", "verified", "disabled"}
-MODEL_TASKS = {"llm", "image", "video", "tts", "music", "asr"}
+MODEL_TASKS = {"llm", "image", "video", "tts", "music", "asr", "workflow"}
 SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
 
 

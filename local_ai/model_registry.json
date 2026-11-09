@@ -21,7 +21,7 @@
     },
     {
       "model_id": "comfyui-workflow-runtime",
-      "task": "image",
+      "task": "workflow",
       "repository": "https://github.com/Comfy-Org/ComfyUI",
       "revision": "fca60fe70e5b84c5c6b058263653d15cb3401e44",
       "runtime": "ComfyUI offline mode",

@@ -1,4 +1,4 @@
-# uneXpected Creator Studio — Workflow Reference v1.1.0
+# uneXpected Creator Studio — Workflow Reference v1.2.0
 
 **Purpose:** Produce original, evidence-grounded videos and platform-ready packages for YouTube and TikTok through the existing uneXpected Coordinator, using local models and local production services only.
 

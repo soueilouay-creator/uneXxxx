@@ -35,6 +35,7 @@ class LocalAITests(unittest.TestCase):
     def test_registry_requires_unique_models_and_valid_model_task(self):
         registry = validate_model_registry({"schema_version": 1, "models": [self.base_model()]})
         self.assertEqual(registry["models"][0]["model_id"], "local-llm-test")
+        self.assertEqual(validate_model_registry({"schema_version": 1, "models": [self.base_model(task="workflow")]})["models"][0]["task"], "workflow")
         with self.assertRaises(LocalAIError):
             validate_model_registry({"schema_version": 1, "models": [self.base_model(), self.base_model()]})
         with self.assertRaises(LocalAIError):

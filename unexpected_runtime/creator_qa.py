@@ -10,8 +10,17 @@ class CreatorVideoQA:
   return {"black_longest_seconds":max(b,default=0.0),"freeze_longest_seconds":max(f,default=0.0)}
  @staticmethod
  def parse_loudness(log):
-  i=re.search(r"(?:Integrated loudness:\s*(?:I:\s*)?|\bI:\s*)(-?[0-9]+(?:\.[0-9]+)?)\s*LUFS",log,re.I);p=re.search(r"(?:True peak:\s*)?Peak:\s*(-?[0-9]+(?:\.[0-9]+)?)\s*dBFS",log,re.I)
-  if not i or not p: raise CreatorVideoQAError("FFmpeg ebur128 did not report loudness and true peak.")
+  # Running ebur128 trace values can begin at -70 LUFS before its gate settles.
+  # Parse the final Summary block when available, not the first transient trace value.
+  summary=re.search(r"(?:^|\n)\s*Summary:\s*(.*)$",log,re.I|re.M|re.S)
+  measured=summary.group(1) if summary else log
+  i=re.search(r"(?:^|\n)\s*I:\s*(-?[0-9]+(?:\.[0-9]+)?)\s*LUFS\s*(?:$|\n)",measured,re.I|re.M)
+  if not i:
+   i=re.search(r"Integrated loudness:\s*(?:I:\s*)?(-?[0-9]+(?:\.[0-9]+)?)\s*LUFS",measured,re.I)
+  p=re.search(r"(?:^|\n)\s*Peak:\s*(-?[0-9]+(?:\.[0-9]+)?)\s*dBFS\s*(?:$|\n)",measured,re.I|re.M)
+  if not p:
+   p=re.search(r"(?:True peak:\s*)?Peak:\s*(-?[0-9]+(?:\.[0-9]+)?)\s*dBFS",measured,re.I)
+  if not i or not p: raise CreatorVideoQAError("FFmpeg ebur128 did not report summary loudness and true peak.")
   return {"integrated_lufs":float(i.group(1)),"true_peak_dbfs":float(p.group(1))}
  @staticmethod
  def parse_caption_file(path,duration):

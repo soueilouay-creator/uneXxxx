@@ -159,6 +159,18 @@ class LocalModelBootstrapTests(unittest.TestCase):
                 bootstrap.install("tiny-local-llm", allow_network=True)
             self.assertFalse((model_root / "llm" / "model.gguf").exists())
 
+    def test_plan_rejects_mutable_or_credential_bearing_model_urls(self):
+        import json
+        with tempfile.TemporaryDirectory() as tmp:
+            bootstrap, _, _, _ = self._fixture(Path(tmp))
+            registry_path = bootstrap.registry_path
+            data = json.loads(registry_path.read_text(encoding="utf-8"))
+            data["models"][0]["weight_files"][0]["source_url"] += "?token=must-not-be-stored"
+            registry_path.write_text(json.dumps(data), encoding="utf-8")
+            model = next(item for item in bootstrap.plan()["models"] if item["model_id"] == "tiny-local-llm")
+            self.assertFalse(model["installable"])
+            self.assertIn("immutable", model["reason"])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

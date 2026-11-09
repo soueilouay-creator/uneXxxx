@@ -183,6 +183,44 @@ class OfflineLocalMediaEndToEndTests(unittest.TestCase):
             self.assertEqual(render["qa"]["checks"]["captions"]["cue_count"], 2)
             self.assertEqual(render["qa"]["checks"]["audio_stream"]["status"], "passed")
 
+            # A machine without a video diffusion model should still create an
+            # explicitly labelled illustrated story using verified local stills.
+            fallback_registry = {"schema_version": 1, "models": [
+                model for model in models if model["task"] != "video"
+            ]}
+            registry_path.write_text(json.dumps(fallback_registry), encoding="utf-8")
+            fallback_tasks = dict(tasks)
+            fallback_tasks.pop("video")
+            config_path.write_text(json.dumps({
+                "schema_version": 1,
+                "comfyui_url": "http://127.0.0.1:8188",
+                "workflow_root": "workflows",
+                "video_fallback": "illustrated_story",
+                "tasks": fallback_tasks,
+            }), encoding="utf-8")
+            fallback_pipeline = LocalMediaPipeline(
+                config_path=config_path,
+                registry_path=registry_path,
+                model_root=model_root,
+                work_root=root / "creator",
+                comfy_client=client,
+                hardware_probe=hardware,
+            )
+            with patch.dict(os.environ, {"UNEXPECTED_AI_MODE": "local_only"}, clear=False):
+                fallback_preflight = fallback_pipeline.preflight(probe_service=True)
+                self.assertTrue(fallback_preflight["ready"], fallback_preflight)
+                fallback_result = fallback_pipeline.produce(
+                    "87654321-abcd",
+                    {"channel_profile": {"youtube": {"format": "shorts", "aspect_ratio": "9:16"}}},
+                    json.dumps(storyboard),
+                    json.dumps(voice),
+                )
+            self.assertEqual(fallback_result["status"], "completed", fallback_result)
+            self.assertEqual(fallback_result["video_mode"], "illustrated_story_procedural")
+            self.assertEqual(fallback_result["render"]["storyboard_stills_count"], 2)
+            self.assertTrue(fallback_result["qa_passed"])
+            self.assertEqual(client.queued, 10)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

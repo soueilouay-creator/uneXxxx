@@ -372,8 +372,8 @@
     finally{button.disabled=!state.creatorRenderJob?.job_id;}
   });
   function buildCinematicBrief() {
-    const prompts=$("cinematic-scenes").value.trim().split(/\\n\\s*\\n/).map(x=>x.trim()).filter(Boolean);
-    const captions=$("cinematic-captions").value.split(/\\r?\\n/).map(x=>x.trim()).filter(Boolean);
+    const prompts=$("cinematic-scenes").value.trim().split(/\n\s*\n/).map(x=>x.trim()).filter(Boolean);
+    const captions=$("cinematic-captions").value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
     if(!prompts.length||prompts.length>12)throw new Error("Provide between 1 and 12 scene prompts.");
     if(captions.length!==prompts.length)throw new Error("Provide exactly one caption line for every scene prompt.");
     const duration=Number($("cinematic-duration").value);

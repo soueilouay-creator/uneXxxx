@@ -67,6 +67,8 @@ class CreatorStudioAPITests(unittest.TestCase):
             "qa":"passed","external_services_used":False,
         }
         class FakeAndroidLite:
+            def preflight(self):
+                return {"ready":True,"network":"not used","video_encoder":"libx264"}
             def render(self,title,script,*,video_format,narration):
                 self.request=(title,script,video_format,narration)
                 return manifest
@@ -83,6 +85,10 @@ class CreatorStudioAPITests(unittest.TestCase):
                      "format":"vertical","narration":"off"}
             self.assertEqual(self.request("POST","/v1/creator/android-videos",payload,auth=False)[0],401)
             self.assertEqual(self.request("GET","/v1/creator/android-videos/"+"a"*32,auth=False)[0],401)
+            self.assertEqual(self.request("GET","/v1/creator/android-lite/status",auth=False)[0],401)
+            preflight_status,preflight=self.request("GET","/v1/creator/android-lite/status")
+            self.assertEqual(preflight_status,200)
+            self.assertTrue(preflight["preflight"]["ready"])
             status,created=self.request("POST","/v1/creator/android-videos",payload)
             self.assertEqual(status,201)
             self.assertEqual(created["video"]["qa"],"passed")

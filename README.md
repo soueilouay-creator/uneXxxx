@@ -175,3 +175,16 @@ The local model inventory is in `local_ai/model_registry.json`. All initial cand
 The persisted Creator Team is invoked by `POST /v1/creator/projects/{project_id}/produce` when local-only mode is enabled. It reuses canonical roles, stores completed stage outputs as Creator Studio versions and resumes completed stages. A production package is not a rendered video; actual local model assets and encoded MP4 QA remain separate acceptance gates.
 
 No cloud AI fallback, automatic model download or publishing is enabled by this profile.
+
+
+## Android Lite local MP4 creator
+
+The Creator Studio includes an **Android Lite** path for phones and small local machines. Open Creator Studio → Android Lite, enter a 25–150 word Latin-script story or narration, choose vertical 9:16 or landscape 16:9, and create a real MP4 with the device's FFmpeg and FFprobe.
+
+- Text-led motion graphics are rendered locally with FFmpeg's drawtext filter; no image or video model is downloaded or required.
+- An original two-tone ambient audio bed is synthesized locally. When `espeak-ng` is already installed, the renderer can also create offline English narration; otherwise the video remains text-led with ambient audio.
+- The renderer verifies the encoded MP4's duration, dimensions, audio/video streams and SHA-256 before it exposes the authenticated preview/download endpoint.
+- Files are stored under `~/.unexpected/creator/android-lite/<video-id>/master.mp4` by default. The browser retrieves them through the bearer-authenticated command-center API.
+- Network access, cloud provider calls, model downloads and publishing are not used by this path.
+
+Android Lite is a procedural motion-graphics creator, not a native AI video model. The separate ComfyUI and local-model workflows remain available as a more advanced path when compatible models, licenses and hardware are verified. The local preflight checks the installed FFmpeg build, drawtext filter, text font and video encoder before rendering.

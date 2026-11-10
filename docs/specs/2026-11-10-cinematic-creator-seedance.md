@@ -27,7 +27,7 @@ The read-only quote uses the provider's published frame-area token formula at $0
 - https://fal.ai/models/bytedance/seedance-2.5/text-to-video
 - https://fal.ai/models/bytedance/seedance-2.5/reference-to-video/api
 
-A signed, 15-minute, single-use quote binds title, character bible, scenes, durations and resolution. The job submission route checks that the approved maximum equals the quote. Status, quote, UI refresh and preflight do not submit paid requests. A lost/uncertain submission is not automatically retried.
+A signed, 15-minute, single-use quote binds title, character bible, scenes, durations and resolution. The job submission route checks that the user acknowledges the quoted estimate. This is not a provider-enforced hard spending cap; final provider billing may vary. Status, quote, UI refresh and preflight do not submit paid requests. A lost/uncertain submission is not automatically retried.
 
 ## Secret handling
 

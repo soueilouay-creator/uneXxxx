@@ -238,9 +238,9 @@ class AndroidLiteVideoCreator:
 
     def render(self, title: str, script: str, *, video_format: str = "vertical",
                narration: str = "auto") -> dict[str, Any]:
-        if video_format not in _ALLOWED_FORMATS:
+        if not isinstance(video_format, str) or video_format not in _ALLOWED_FORMATS:
             raise AndroidLiteVideoError("Format must be vertical or landscape.")
-        if narration not in {"auto", "off"}:
+        if not isinstance(narration, str) or narration not in {"auto", "off"}:
             raise AndroidLiteVideoError("Narration mode must be auto or off.")
         safe_title = _safe_text(title, "Title", MAX_TITLE_CHARS)
         safe_script = _safe_text(script, "Script", 12000)
@@ -312,7 +312,7 @@ class AndroidLiteVideoCreator:
             parts.append(
                 "drawtext=fontfile='" + _filter_path(font) + "':textfile='"
                 + _filter_path(scene_file) + "':fontcolor=white:fontsize="
-                + ("47" if format == "vertical" else "43")
+                + ("47" if video_format == "vertical" else "43")
                 + ":line_spacing=18:borderw=1:bordercolor=0x10162B@0.95:"
                 "x=(w-text_w)/2:y=(h-text_h)/2:box=1:boxcolor=0x111A30@0.72:"
                 "boxborderw=34:alpha='if(lt(t,"

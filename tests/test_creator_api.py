@@ -1,5 +1,6 @@
 from __future__ import annotations
 import http.client,json,tempfile,threading,unittest
+from unittest.mock import patch
 from unexpected_runtime.coordinator import Coordinator
 from unexpected_runtime.http_api import create_server
 from unexpected_runtime.providers import DeterministicMockProvider
@@ -56,6 +57,43 @@ class CreatorStudioAPITests(unittest.TestCase):
         self.assertFalse(body["renderer_configured"])
         self.assertFalse(body["artifact_storage_configured"])
         self.assertFalse(body["publishing_enabled"])
+
+
+    def test_android_lite_video_endpoints_are_authenticated_and_serve_verified_mp4(self):
+        manifest={
+            "status":"completed","video_id":"a"*32,"title":"Local story",
+            "file_name":"master.mp4","byte_size":8,"sha256":"b"*64,
+            "width":720,"height":1280,"duration_seconds":30.0,
+            "qa":"passed","external_services_used":False,
+        }
+        class FakeAndroidLite:
+            def render(self,title,script,*,video_format,narration):
+                self.request=(title,script,video_format,narration)
+                return manifest
+            def get_video(self,video_id):
+                self.asserted_id=video_id
+                return manifest
+            def read_video(self,video_id):
+                self.asserted_file_id=video_id
+                return b"fake-mp4"
+        fake=FakeAndroidLite()
+        with patch("unexpected_runtime.android_lite_video.AndroidLiteVideoCreator.from_environment",
+                   return_value=fake):
+            payload={"title":"Local story","script":"A short local video script with enough words for a test.",
+                     "format":"vertical","narration":"off"}
+            self.assertEqual(self.request("POST","/v1/creator/android-videos",payload,auth=False)[0],401)
+            self.assertEqual(self.request("GET","/v1/creator/android-videos/"+"a"*32,auth=False)[0],401)
+            status,created=self.request("POST","/v1/creator/android-videos",payload)
+            self.assertEqual(status,201)
+            self.assertEqual(created["video"]["qa"],"passed")
+            self.assertEqual(fake.request[2:],"vertical")
+            status,detail=self.request("GET","/v1/creator/android-videos/"+"a"*32)
+            self.assertEqual(status,200)
+            self.assertEqual(detail["video"]["video_id"],"a"*32)
+            status,mp4=self.request("GET","/v1/creator/android-videos/"+"a"*32+"/file")
+            self.assertEqual(status,200)
+            self.assertEqual(mp4,"fake-mp4")
+            self.assertEqual(self.request("POST","/v1/creator/android-videos",{**payload,"publish":True})[0],400)
 
     def test_unknown_fields_and_non_platform_channels_are_rejected(self):
         payload=self.payload();payload["channel_profile"]["instagram"]={"format":"reels"}

@@ -31,6 +31,20 @@ class Coordinator:
             self.store=StateStore(root/'uneXpected.sqlite3')
         else:
             raise RuntimeError('UNEXPECTED_STORAGE_BACKEND must be sqlite or postgres.')
+        from .creator_studio import CreatorStudioService
+        self.creator_studio=CreatorStudioService(self.store)
+        from .local_ai_supervisor import LocalAISupervisor
+        self.local_ai_supervisor=LocalAISupervisor(
+            model_root=os.getenv('UNEXPECTED_MODEL_ROOT', str(Path(__file__).resolve().parent.parent/'models')),
+            registry_path=os.getenv('UNEXPECTED_MODEL_REGISTRY', str(Path(__file__).resolve().parent.parent/'local_ai'/'model_registry.json')),
+            state_dir=root/'local-ai-supervisor')
+        self.local_media_pipeline=None
+        if os.getenv('UNEXPECTED_AI_MODE','').strip().lower() in {'local_only','local-only'}:
+            from .local_media import LocalMediaPipeline
+            self.local_media_pipeline=LocalMediaPipeline.from_environment()
+        from .creator_team import CreatorTeamRunner
+        self.creator_team=CreatorTeamRunner(self)
+        self.creator_recovery=self.creator_studio.recover_interrupted_jobs()
         self.provider=provider or provider_router_from_env()
         self.skills=SkillRegistry.load(skill_manifest_path, skill_package_root)
         self.approval_verifier = approval_verifier if approval_verifier is not None else approval_verifier_from_env(state_dir=root)

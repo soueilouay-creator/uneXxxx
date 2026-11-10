@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  const state = { token: "", agents: [], providers: [], tasks: [], skills: [], mcpTools: [], capabilities: [], workflowCatalog: null, inventoryErrors: {}, inventoryRequestId: 0, status: null, traceTaskId: null, traceCursor: 0 };
+  const state = { token: "", agents: [], providers: [], tasks: [], skills: [], mcpTools: [], capabilities: [], workflowCatalog: null, inventoryErrors: {}, inventoryRequestId: 0, status: null, traceTaskId: null, traceCursor: 0, creatorProjects: [], creatorProject: null, creatorDetail: null, creatorRenderJob: null, androidVideo: null, androidVideoUrl: null };
   const $ = (id) => document.getElementById(id);
   const esc = (v) => String(v ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   const time = (v) => { if (!v) return "—"; const n=Number(v); const d=new Date(n>1e12?n:n*1000); return Number.isNaN(d.getTime())?String(v):d.toLocaleString(); };
@@ -166,15 +166,80 @@
     renderWorkflowCatalogue();
     renderSkillsAndTools();
   }
+  function renderCreatorProjects() {
+    const items=state.creatorProjects||[];
+    $("creator-project-count").textContent=String(items.length);
+    if(!items.length){$("creator-project-list").innerHTML='<div class="empty">No creator projects yet. Create one to begin.</div>';return;}
+    $("creator-project-list").innerHTML=items.map(p=>'<button type="button" class="creator-project-item '+(state.creatorProject?.project_id===p.project_id?'selected':'')+'" data-creator-project="'+esc(p.project_id)+'"><span><b>'+esc(p.title)+'</b><small>'+esc(p.topic)+'</small></span><span class="state">'+esc(p.status)+'</span></button>').join("");
+  }
+  function renderCreatorDetail(detail) {
+    if(!detail||!detail.project)return;
+    state.creatorDetail=detail;state.creatorProject=detail.project;
+    const p=detail.project,versions=detail.versions||[],assets=detail.assets||[],jobs=detail.render_jobs||[];
+    $("creator-editor-title").textContent=p.title;
+    const longform=p.channel_profile?.youtube?.format==="longform";
+    $("creator-format").value=longform?"youtube_longform":"youtube_shorts";
+    $("creator-format-note").textContent=longform?"Long-form episodes use 1920×1080, illustrated scenes, narration WAV and timed subtitles. Vertical derivatives are separate.":"Vertical 9:16 motion master for Shorts and TikTok.";
+    const latestVersion=versions[versions.length-1]?.content||{};
+    $("creator-hook").value=latestVersion.hook||"";$("creator-script").value=latestVersion.script||"";
+    $("creator-scenes").value=JSON.stringify(latestVersion.scenes||[{scene_id:"scene-01",image:"scenes/scene-01.png",duration_seconds:45,visual_prompt:"Opening visual",narration:"Opening hook",on_screen_text:"A story begins"}],null,2);
+    $("creator-project-status").textContent=p.status||"idea";
+    $("creator-save-version").disabled=false;
+    $("creator-version-state").textContent="Project selected · "+versions.length+" saved versions";
+    $("creator-versions").innerHTML=versions.length?versions.map(v=>'<div class="list-row"><div><div class="list-title">v'+esc(v.version_no)+' · '+esc(v.kind)+'</div><div class="list-detail">'+esc(JSON.stringify(v.content||{}).slice(0,220))+'</div></div><div class="list-meta">'+esc(time(v.created_at))+'</div></div>').join(""):'<div class="empty">Save your first script and storyboard.</div>';
+    const master=assets.find(a=>a.kind==="video_master"&&a.qa_status==="passed");
+    $("creator-preview").innerHTML=master?'<div class="creator-preview-meta"><b>Verified video asset registered</b><small>'+esc(master.byte_size)+' bytes · SHA-256 '+esc(master.sha256)+'</small><small>Playback URL is unavailable until durable artifact retrieval is configured.</small></div>':'<span>No verified encoded MP4 is attached to this project yet.</span>';
+    const qa=assets.filter(a=>a.kind==="qa_report");
+    $("creator-qa").innerHTML=qa.length?qa.map(a=>'<div class="list-row"><div class="list-title">QA report</div><div class="list-meta"><span class="state">'+esc(a.qa_status)+'</span></div></div>').join(""):'<div class="empty">No encoded-media QA report is attached.</div>';
+    const latest=jobs[0]||null;
+    if(latest) {
+      state.creatorRenderJob=latest;
+      $("creator-render-state").textContent=latest.status||"unknown";
+      $("creator-render-detail").textContent=latest.job_id||"";
+      $("creator-render-result").textContent=(latest.result_manifest?.code||latest.result_manifest?.stage||latest.result_manifest?.status||"Render state recorded")+ " · "+latest.status;
+      $("creator-job-refresh").disabled=false;
+    } else {
+      state.creatorRenderJob=null;
+      $("creator-render-state").textContent="Idle";
+      $("creator-render-detail").textContent="No active render job";
+      $("creator-render-result").textContent="No render requested.";
+      $("creator-job-refresh").disabled=true;
+    }
+    const canExport=Boolean(master&&qa.some(a=>a.qa_status==="passed"));
+    $("creator-youtube-state").textContent=canExport?"Verified video and QA evidence present; final playback/package retrieval is awaiting durable artifact storage.":"Waiting for a verified 16:9 master, thumbnail and passing QA.";
+    $("creator-tiktok-state").textContent=canExport?"A vertical derivative still needs its own render and QA.":"Prepared separately after the YouTube story master is accepted.";
+    $("creator-render").disabled=versions.length===0;
+    renderCreatorProjects();
+  }
+  async function loadCreatorProject(projectId) {
+    const detail=await api("/v1/creator/projects/"+encodeURIComponent(projectId));
+    renderCreatorDetail(detail);
+  }
+  async function refreshCreatorJob() {
+    if(!state.creatorRenderJob?.job_id)return;
+    const result=await api("/v1/creator/render-jobs/"+encodeURIComponent(state.creatorRenderJob.job_id));
+    state.creatorRenderJob=result.job;
+    $("creator-render-state").textContent=result.job.status||"unknown";
+    $("creator-render-detail").textContent=result.job.job_id;
+    $("creator-render-result").textContent=(result.progress?.code||result.progress?.stage||result.progress?.status||"Progress retrieved")+" · "+result.job.status;
+    if(state.creatorProject)await loadCreatorProject(state.creatorProject.project_id);
+  }
   async function refresh() {
     $("refresh").disabled=true;
     try {
-      const [status,agents,tasks,events,providers,caps,improvements,approvals,resources,qualityRuns]=await Promise.all([
+      const [status,agents,tasks,events,providers,caps,improvements,approvals,resources,qualityRuns,creatorProjects,creatorStatus,androidVideoStatus]=await Promise.all([
         api("/v1/status"),api("/v1/agents"),api("/v1/tasks?limit=8"),api("/v1/events?limit=8"),
         api("/v1/providers"),api("/v1/capabilities"),api("/v1/improvements"),api("/v1/approvals"),
-        api("/v1/resources?limit=100"),api("/v1/quality-evaluations?limit=20")
+        api("/v1/resources?limit=100"),api("/v1/quality-evaluations?limit=20"),api("/v1/creator/projects?limit=50"),api("/v1/creator/status"),api("/v1/creator/android-lite/status")
       ]);
-      state.status=status; state.agents=agents.items||[]; state.tasks=tasks.items||[]; state.capabilities=caps.items||[];
+      state.status=status; state.agents=agents.items||[]; state.tasks=tasks.items||[]; state.capabilities=caps.items||[]; state.creatorProjects=creatorProjects.items||[];
+      $("creator-engine-state").textContent=creatorStatus.renderer_configured?"Worker enabled":"Worker blocked";
+      $("creator-render-detail").textContent=creatorStatus.artifact_storage_configured?"Artifact storage configured":"Durable artifact storage not configured";
+      const androidPreflight=androidVideoStatus.preflight||{};
+      $("android-video-preflight").textContent=androidPreflight.ready
+        ?"Ready · offline FFmpeg"
+        :"Needs setup · "+((androidPreflight.issues||[androidPreflight.reason||"local renderer unavailable"]).join(" "));
+      $("android-video-preflight").className="state "+(androidPreflight.ready?"ok":"warning");
       $("metric-health").textContent=status.health?.status||"Ready";
       $("health-note").textContent=status.health?.detail||"Runtime status received";
       $("metric-agents").textContent=agents.count??state.agents.length;
@@ -205,7 +270,7 @@
       $("replay-state").textContent=status.governance?.replay_protection||"Not verified";
       $("recovery-state").textContent=status.storage?.recovery||"Not verified";
       $("updated").textContent="Updated "+new Date().toLocaleTimeString();
-      renderAgents(); renderProviders(providers.providers||[]); setConnected(true); void loadOptionalInventories();
+      renderAgents(); renderProviders(providers.providers||[]); renderCreatorProjects(); setConnected(true); void loadOptionalInventories();
     } catch(error) {
       setConnected(false);
       if (error.message==="Unauthorized."||error.message==="Unauthorized") {
@@ -217,9 +282,9 @@
   function showView(name) {
     document.querySelectorAll(".view").forEach(v=>v.classList.toggle("active",v.id==="view-"+name));
     document.querySelectorAll(".nav").forEach(v=>v.classList.toggle("active",v.dataset.view===name));
-    const titles={overview:"System overview",agents:"Agent registry",tasks:"Tasks & workflows",providers:"AI providers",capabilities:"Capabilities",intelligence:"Resource & AI quality",governance:"Governance",audit:"Audit & learning",workflows:"Workflow Studio",skills:"Skills & tools"};
+    const titles={overview:"System overview",agents:"Agent registry",tasks:"Tasks & workflows",providers:"AI providers",capabilities:"Capabilities",intelligence:"Resource & AI quality",governance:"Governance",audit:"Audit & learning",workflows:"Workflow Studio",skills:"Skills & tools",creator:"Creator Studio"};
     $("page-title").textContent=titles[name]||"System overview";
-    if (name==="tasks"||name==="audit"||name==="governance"||name==="intelligence"||name==="workflows"||name==="skills") refresh();
+    if (name==="creator"||name==="tasks"||name==="audit"||name==="governance"||name==="intelligence"||name==="workflows"||name==="skills") refresh();
   }
   document.querySelectorAll("[data-view]").forEach(link=>link.addEventListener("click",e=>{e.preventDefault();const name=link.dataset.view;showView(name);history.replaceState(null,"","#"+name);}));
   $("refresh").addEventListener("click",refresh);
@@ -237,6 +302,106 @@
     if(!state.traceTaskId)return;
     $("trace-load-more").disabled=true;
     await loadTaskTrace(state.traceTaskId,state.traceCursor,true);
+  });
+  $("creator-refresh").addEventListener("click",async()=>{await refresh();if(state.creatorProject)await loadCreatorProject(state.creatorProject.project_id);});
+  $("creator-project-list").addEventListener("click",async e=>{
+    const button=e.target.closest("[data-creator-project]");if(!button)return;
+    try{await loadCreatorProject(button.dataset.creatorProject);toast("Creator project loaded");}
+    catch(error){toast("Project could not be loaded: "+error.message);}
+  });
+  $("creator-project-form").addEventListener("submit",async e=>{
+    e.preventDefault();const button=$("creator-create");button.disabled=true;
+    $("creator-create-result").textContent="Saving project…";
+    const payload={title:$("creator-title").value.trim(),topic:$("creator-topic").value.trim(),language:$("creator-language").value.trim(),
+      channel_profile:$("creator-format").value==="youtube_longform"?{youtube:{format:"longform",aspect_ratio:"16:9",duration_min_seconds:1800,duration_max_seconds:2700}}:{youtube:{format:"shorts",aspect_ratio:"9:16"},tiktok:{format:"vertical",aspect_ratio:"9:16"}}};
+    try {
+      const result=await api("/v1/creator/projects",{method:"POST",body:JSON.stringify(payload)});
+      $("creator-create-result").textContent="Project saved · "+result.project.project_id;
+      await refresh();await loadCreatorProject(result.project.project_id);toast("Creator project created");
+    } catch(error){$("creator-create-result").textContent="Project not saved: "+error.message;toast(error.message);}
+    finally{button.disabled=false;}
+  });
+  $("creator-format").addEventListener("change",()=>{
+    const longform=$("creator-format").value==="youtube_longform";
+    $("creator-format-note").textContent=longform?"Long-form episodes use 1920×1080, illustrated scenes, narration WAV and timed subtitles. Vertical derivatives are separate.":"Vertical 9:16 motion master for Shorts and TikTok.";
+  });
+  $("creator-version-form").addEventListener("submit",async e=>{
+    e.preventDefault();if(!state.creatorProject)return;
+    const button=$("creator-save-version");button.disabled=true;
+    try {
+      let scenes;try{scenes=JSON.parse($("creator-scenes").value);}catch(_){throw new Error("Scenes must be valid JSON.");}
+      if(!Array.isArray(scenes)||scenes.length>120)throw new Error("Scenes must be a JSON array with at most 120 entries.");
+      const content={hook:$("creator-hook").value.trim(),script:$("creator-script").value,scenes};
+      const result=await api("/v1/creator/projects/"+encodeURIComponent(state.creatorProject.project_id)+"/versions",
+        {method:"POST",body:JSON.stringify({kind:"treatment",content,parent_version_id:state.creatorDetail?.versions?.at(-1)?.version_id||null})});
+      $("creator-version-state").textContent="Saved version "+(result.version.version_no||"");
+      await loadCreatorProject(state.creatorProject.project_id);toast("Script and scenes saved");
+    } catch(error){$("creator-version-state").textContent="Not saved: "+error.message;toast(error.message);}
+    finally{button.disabled=!state.creatorProject;}
+  });
+  $("creator-render").addEventListener("click",async()=>{
+    if(!state.creatorProject||!state.creatorDetail?.versions?.length)return;
+    const button=$("creator-render");button.disabled=true;$("creator-render-result").textContent="Persisting render request…";
+    const latest=state.creatorDetail.versions[state.creatorDetail.versions.length-1];
+    const longform=state.creatorProject.channel_profile?.youtube?.format==="longform";
+    const payload={version_id:latest.version_id,style_id:$("creator-style").value,idempotency_key:"render-"+latest.version_id,
+      resource_limits:longform?{cpu_seconds:600,memory_mb:4096,wall_time_seconds:3600}:{cpu_seconds:240,memory_mb:2048,wall_time_seconds:900},request:longform?{profile:"youtube_longform",render_mode:"story_film",targets:["youtube"],fps:24}:{profile:"youtube_shorts",render_mode:"opuscar",targets:["youtube","tiktok"]}};
+    try {
+      const result=await api("/v1/creator/projects/"+encodeURIComponent(state.creatorProject.project_id)+"/render-jobs",
+        {method:"POST",body:JSON.stringify(payload)});
+      state.creatorRenderJob=result.job;await loadCreatorProject(state.creatorProject.project_id);
+      $("creator-render-result").textContent="Render job created · "+result.job.status;toast("Render request recorded");
+    } catch(error) {
+      if(error.body?.job){state.creatorRenderJob=error.body.job;await loadCreatorProject(state.creatorProject.project_id);}
+      $("creator-render-result").textContent=error.body?.job?"Render job saved but blocked: "+(error.body.reason||error.body.progress?.code||error.message):"Render request failed: "+error.message;
+      toast(error.message);
+    } finally {button.disabled=!state.creatorDetail?.versions?.length;}
+  });
+  $("creator-job-refresh").addEventListener("click",async()=>{
+    const button=$("creator-job-refresh");button.disabled=true;
+    try{await refreshCreatorJob();toast("Render progress refreshed");}
+    catch(error){$("creator-render-result").textContent="Progress unavailable: "+error.message;toast(error.message);}
+    finally{button.disabled=!state.creatorRenderJob?.job_id;}
+  });
+  $("android-video-form").addEventListener("submit",async e=>{
+    e.preventDefault();
+    const button=$("android-video-create"),status=$("android-video-status"),output=$("android-video-output");
+    const script=$("android-video-script").value.trim();
+    const words=script?script.split(/\s+/).length:0;
+    if(words<25||words>150){status.textContent="Use a script between 25 and 150 words.";return;}
+    button.disabled=true;status.textContent="Rendering locally with FFmpeg. This can take a little while on a phone.";
+    output.textContent="Preparing scenes and encoding the MP4…";
+    try {
+      const response=await api("/v1/creator/android-videos",{method:"POST",body:JSON.stringify({
+        title:$("android-video-title").value.trim(),script,
+        format:$("android-video-format").value,narration:$("android-video-narration").value
+      })});
+      const video=response.video||{};
+      const fileResponse=await fetch("/v1/creator/android-videos/"+encodeURIComponent(video.video_id)+"/file",{
+        headers:{Authorization:"Bearer "+state.token},cache:"no-store"
+      });
+      if(!fileResponse.ok)throw new Error("The MP4 was created but its download endpoint returned "+fileResponse.status+".");
+      const blob=await fileResponse.blob();
+      if(state.androidVideoUrl)URL.revokeObjectURL(state.androidVideoUrl);
+      state.androidVideoUrl=URL.createObjectURL(blob);state.androidVideo=video;
+      const player=document.createElement("video");
+      player.controls=true;player.playsInline=true;player.preload="metadata";player.src=state.androidVideoUrl;
+      const meta=document.createElement("p");
+      meta.className="android-video-meta";
+      meta.textContent=video.duration_seconds+" seconds · "+video.width+"×"+video.height+" · "+video.video_codec+" · QA "+video.qa+
+        " · narration: "+video.narration;
+      const download=document.createElement("a");
+      download.className="button primary android-video-download";
+      download.href=state.androidVideoUrl;download.download="uneXpected-"+video.video_id+".mp4";
+      download.textContent="Download MP4 ↓";
+      output.replaceChildren(player,meta,download);
+      status.textContent="Video rendered and verified · "+video.byte_size+" bytes · SHA-256 "+video.sha256;
+      toast("Local MP4 created");
+    } catch(error) {
+      status.textContent="Video creation or retrieval failed: "+error.message;
+      output.textContent="No verified preview is available.";
+      toast(error.message);
+    } finally {button.disabled=false;}
   });
   $("provider-grid").addEventListener("click",async e=>{
     const button=e.target.closest("[data-test-provider]");

@@ -3,9 +3,9 @@
   "skills": [
     {
       "id": "creative-media",
-      "version": "1.0.0",
+      "version": "1.2.0",
       "path": "skills/creative-media/WORKFLOW.md",
-      "sha256": "fd3be6fe0d44c2055cba937d7fdae727755cb4330b22d71f904e6cb13c6f3cd2",
+      "sha256": "ae964a23e231b1c42ddce5e17ca780db18c21795731ff0c11ad3355267944dbb",
       "agent_ids": [
         "creative-director",
         "media-producer",
@@ -14,19 +14,49 @@
       ],
       "trigger_terms": [
         "video",
+        "youtube",
+        "youtube shorts",
+        "tiktok",
         "shorts",
         "reel",
-        "image",
-        "thumbnail",
+        "story",
+        "storytelling",
+        "film",
+        "filmmaking",
+        "animation",
+        "storyboard",
+        "treatment",
+        "shot list",
         "voiceover",
         "voice over",
+        "narration",
+        "subtitles",
+        "captions",
+        "sound design",
         "music",
         "sound effect",
-        "social media video",
-        "creative media"
+        "thumbnail",
+        "video editing",
+        "creative media",
+        "creator studio"
       ],
-      "source_ref": "v7.1 overlay b501541df57e503ac7736c3e8dbff232c6931cef081f43cb4dba7b80278ac92d:skills/creative-media/WORKFLOW.md",
-      "status": "active"
+      "source_ref": "uneXpected local-only Creator Studio v1.2.0; no cloud model APIs; Lemo Opuscar pinned",
+      "status": "active",
+      "description": "Local-only governed Creator Studio with resumable role-team orchestration, local model generation, rendering and encoded-media QA.",
+      "invocation_mode": "automatic",
+      "allowed_tools": [],
+      "resources": [
+        {
+          "path": "skills/creative-media/references/lemo-opuscar-interface.md",
+          "sha256": "9f392fe2ce2240d1d793ecb56959a071b634a19c44f8933f88708704869e1678",
+          "kind": "reference"
+        },
+        {
+          "path": "skills/creative-media/references/local-only-creator-team.md",
+          "sha256": "14def7096703ec8c44e3f21fcb08c5844a64535cf6a72b5a80ae07b41c18e5cd",
+          "kind": "reference"
+        }
+      ]
     },
     {
       "id": "skill-engineering",
@@ -73,38 +103,6 @@
       ],
       "source_ref": "canonical v7 runtime:self_improvement/SKILL.md",
       "status": "active"
-    },
-    {
-      "id": "industrial-maintenance-sales",
-      "version": "1.0.0",
-      "path": "skills/industrial-maintenance-sales/SKILL.md",
-      "sha256": "ece5a8c3cc9c3de4c316236f665eac6ba714ea053a56de63cdcf0087d9ba892c",
-      "agent_ids": [
-        "sales-intel",
-        "business-strategist",
-        "maintenance-engineer",
-        "marketing-seo",
-        "data-analyst",
-        "project-manager",
-        "code-reviewer",
-        "self-improvement-governor"
-      ],
-      "trigger_terms": [
-        "industrial maintenance sales",
-        "preventive maintenance tracker",
-        "spare-parts tracker",
-        "sales control center",
-        "prospect pipeline",
-        "maintenance sales",
-        "customer enquiry",
-        "qualified demo"
-      ],
-      "source_ref": "uneXxxx PR #4: reviewed sales workflow mapped to existing canonical roles",
-      "status": "active",
-      "invocation_mode": "automatic",
-      "description": "Evidence-led sales workflow for preventive-maintenance and spare-parts tracking offers, with approval-gated outreach and verified demo/conversion stages.",
-      "allowed_tools": [],
-      "resources": []
     }
   ]
 }

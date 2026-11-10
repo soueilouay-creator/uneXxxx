@@ -36,6 +36,42 @@ class StateStore:
             CREATE TABLE IF NOT EXISTS baselines(agent_id TEXT NOT NULL, benchmark_id TEXT NOT NULL, report_json TEXT NOT NULL, created_at REAL NOT NULL, active_version TEXT, instruction_sha256 TEXT, report_sha256 TEXT, PRIMARY KEY(agent_id,benchmark_id));
             CREATE TABLE IF NOT EXISTS capabilities(capability_id TEXT PRIMARY KEY, status TEXT NOT NULL, record_json TEXT NOT NULL, created_at REAL NOT NULL, updated_at REAL NOT NULL);
             CREATE INDEX IF NOT EXISTS idx_capabilities_status_updated ON capabilities(status,updated_at);
+
+            CREATE TABLE IF NOT EXISTS creator_projects (
+                project_id TEXT PRIMARY KEY,title TEXT NOT NULL,topic TEXT NOT NULL,
+                channel_profile_json TEXT NOT NULL,language TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(status IN ('idea','researching','treatment_ready','storyboard_ready','authoring','render_queued','rendering','blocked','qa_failed','qa_passed','human_approved','package_ready','uploaded','scheduled','published','archived')),
+                created_at REAL NOT NULL,updated_at REAL NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_creator_projects_status_updated ON creator_projects(status,updated_at);
+            CREATE TABLE IF NOT EXISTS creator_project_versions (
+                version_id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL REFERENCES creator_projects(project_id) ON DELETE RESTRICT,
+                version_no INTEGER NOT NULL CHECK(version_no>0),kind TEXT NOT NULL,content_json TEXT NOT NULL,
+                parent_version_id TEXT,created_at REAL NOT NULL,
+                UNIQUE(project_id,version_no),UNIQUE(project_id,version_id),
+                FOREIGN KEY(project_id,parent_version_id) REFERENCES creator_project_versions(project_id,version_id) ON DELETE RESTRICT
+            );
+            CREATE INDEX IF NOT EXISTS idx_creator_versions_project_no ON creator_project_versions(project_id,version_no);
+            CREATE TABLE IF NOT EXISTS creator_project_assets (
+                asset_id TEXT PRIMARY KEY,project_id TEXT NOT NULL REFERENCES creator_projects(project_id) ON DELETE RESTRICT,
+                version_id TEXT NOT NULL,kind TEXT NOT NULL,storage_key TEXT NOT NULL UNIQUE,
+                sha256 TEXT NOT NULL CHECK(length(sha256)=64),byte_size INTEGER NOT NULL CHECK(byte_size>=0),
+                mime_type TEXT NOT NULL,provenance_json TEXT NOT NULL,license_json TEXT NOT NULL,
+                qa_status TEXT NOT NULL CHECK(qa_status IN ('pending','needs_review','passed','failed')),created_at REAL NOT NULL,
+                FOREIGN KEY(project_id,version_id) REFERENCES creator_project_versions(project_id,version_id) ON DELETE RESTRICT
+            );
+            CREATE INDEX IF NOT EXISTS idx_creator_assets_project ON creator_project_assets(project_id,created_at);
+            CREATE TABLE IF NOT EXISTS creator_render_jobs (
+                job_id TEXT PRIMARY KEY,project_id TEXT NOT NULL REFERENCES creator_projects(project_id) ON DELETE RESTRICT,
+                version_id TEXT NOT NULL,engine_commit TEXT NOT NULL CHECK(length(engine_commit)=40),style_id TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(status IN ('queued','blocked','running','succeeded','failed','cancelled')),
+                idempotency_key TEXT NOT NULL UNIQUE,request_hash TEXT NOT NULL CHECK(length(request_hash)=64),
+                resource_limits_json TEXT NOT NULL,result_manifest_json TEXT NOT NULL,
+                created_at REAL NOT NULL,updated_at REAL NOT NULL,
+                FOREIGN KEY(project_id,version_id) REFERENCES creator_project_versions(project_id,version_id) ON DELETE RESTRICT
+            );
+            CREATE INDEX IF NOT EXISTS idx_creator_render_jobs_project_created ON creator_render_jobs(project_id,created_at);
             """)
             baseline_columns={row['name'] for row in c.execute('PRAGMA table_info(baselines)').fetchall()}
             for column, declaration in (('active_version','TEXT'),('instruction_sha256','TEXT'),('report_sha256','TEXT')):
@@ -246,3 +282,106 @@ class StateStore:
             item['evaluation_context']=json.loads(item.pop('evaluation_context_json') or '{}')
             items.append(item)
         return items
+
+    @staticmethod
+    def _creator_project_row(row):
+        if not row: return None
+        item=dict(row); item["channel_profile"]=json.loads(item.pop("channel_profile_json")); return item
+
+    @staticmethod
+    def _creator_version_row(row):
+        if not row: return None
+        item=dict(row); item["content"]=json.loads(item.pop("content_json")); return item
+
+    @staticmethod
+    def _creator_asset_row(row):
+        if not row: return None
+        item=dict(row); item["provenance"]=json.loads(item.pop("provenance_json")); item["license"]=json.loads(item.pop("license_json")); return item
+
+    @staticmethod
+    def _creator_render_job_row(row):
+        if not row: return None
+        item=dict(row); item["resource_limits"]=json.loads(item.pop("resource_limits_json")); item["result_manifest"]=json.loads(item.pop("result_manifest_json")); return item
+
+    def create_creator_project(self,project,actor):
+        now=time.time()
+        with self._session() as c:
+            c.execute("INSERT INTO creator_projects(project_id,title,topic,channel_profile_json,language,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+                (project["project_id"],project["title"],project["topic"],json.dumps(project["channel_profile"],ensure_ascii=False,sort_keys=True),project["language"],"idea",now,now))
+            c.execute("INSERT INTO events(ts,event_type,payload_json) VALUES(?,?,?)",(now,"creator_project_created",json.dumps({"project_id":project["project_id"],"actor":actor},ensure_ascii=False,sort_keys=True)))
+        return self.get_creator_project(project["project_id"])
+
+    def get_creator_project(self,project_id):
+        with self._session() as c: row=c.execute("SELECT * FROM creator_projects WHERE project_id=?",(project_id,)).fetchone()
+        return self._creator_project_row(row)
+
+    def list_creator_projects(self,limit=50):
+        bounded=max(1,min(int(limit),200))
+        with self._session() as c: rows=c.execute("SELECT * FROM creator_projects ORDER BY updated_at DESC,project_id LIMIT ?",(bounded,)).fetchall()
+        return [self._creator_project_row(row) for row in rows]
+
+    def transition_creator_project(self,project_id,expected_status,next_status,actor,evidence):
+        now=time.time()
+        with self._session() as c:
+            cur=c.execute("UPDATE creator_projects SET status=?,updated_at=? WHERE project_id=? AND status=?",(next_status,now,project_id,expected_status))
+            if cur.rowcount!=1:return None
+            c.execute("INSERT INTO events(ts,event_type,payload_json) VALUES(?,?,?)",(now,"creator_project_transition",json.dumps({"project_id":project_id,"from":expected_status,"to":next_status,"actor":actor,"evidence":evidence},ensure_ascii=False,sort_keys=True)))
+            row=c.execute("SELECT * FROM creator_projects WHERE project_id=?",(project_id,)).fetchone()
+        return self._creator_project_row(row)
+
+    def create_creator_version(self,project_id,version_id,kind,content,parent_version_id,actor):
+        now=time.time()
+        with self._session() as c:
+            c.execute("BEGIN IMMEDIATE")
+            if not c.execute("SELECT 1 FROM creator_projects WHERE project_id=?",(project_id,)).fetchone():raise ValueError("Unknown creator project.")
+            if parent_version_id and not c.execute("SELECT 1 FROM creator_project_versions WHERE project_id=? AND version_id=?",(project_id,parent_version_id)).fetchone():raise ValueError("Parent version does not belong to this project.")
+            row=c.execute("SELECT COALESCE(MAX(version_no),0)+1 AS next_version FROM creator_project_versions WHERE project_id=?",(project_id,)).fetchone()
+            version_no=int(row["next_version"])
+            c.execute("INSERT INTO creator_project_versions(version_id,project_id,version_no,kind,content_json,parent_version_id,created_at) VALUES(?,?,?,?,?,?,?)",(version_id,project_id,version_no,kind,json.dumps(content,ensure_ascii=False,sort_keys=True,allow_nan=False),parent_version_id,now))
+            c.execute("INSERT INTO events(ts,event_type,payload_json) VALUES(?,?,?)",(now,"creator_version_created",json.dumps({"project_id":project_id,"version_id":version_id,"version_no":version_no,"kind":kind,"actor":actor},ensure_ascii=False,sort_keys=True)))
+            result=c.execute("SELECT * FROM creator_project_versions WHERE version_id=?",(version_id,)).fetchone()
+        return self._creator_version_row(result)
+
+    def list_creator_versions(self,project_id):
+        with self._session() as c: rows=c.execute("SELECT * FROM creator_project_versions WHERE project_id=? ORDER BY version_no",(project_id,)).fetchall()
+        return [self._creator_version_row(row) for row in rows]
+
+    def create_creator_asset(self,asset):
+        with self._session() as c:
+            c.execute("INSERT INTO creator_project_assets(asset_id,project_id,version_id,kind,storage_key,sha256,byte_size,mime_type,provenance_json,license_json,qa_status,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",(asset["asset_id"],asset["project_id"],asset["version_id"],asset["kind"],asset["storage_key"],asset["sha256"],asset["byte_size"],asset["mime_type"],json.dumps(asset["provenance"],ensure_ascii=False,sort_keys=True),json.dumps(asset["license"],ensure_ascii=False,sort_keys=True),asset["qa_status"],time.time()))
+            row=c.execute("SELECT * FROM creator_project_assets WHERE asset_id=?",(asset["asset_id"],)).fetchone()
+        return self._creator_asset_row(row)
+
+    def list_creator_assets(self,project_id,version_id=None):
+        with self._session() as c:
+            if version_id: rows=c.execute("SELECT * FROM creator_project_assets WHERE project_id=? AND version_id=? ORDER BY created_at,asset_id",(project_id,version_id)).fetchall()
+            else: rows=c.execute("SELECT * FROM creator_project_assets WHERE project_id=? ORDER BY created_at,asset_id",(project_id,)).fetchall()
+        return [self._creator_asset_row(row) for row in rows]
+
+    def create_creator_render_job(self,job):
+        with self._session() as c:
+            cur=c.execute("INSERT OR IGNORE INTO creator_render_jobs(job_id,project_id,version_id,engine_commit,style_id,status,idempotency_key,request_hash,resource_limits_json,result_manifest_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",(job["job_id"],job["project_id"],job["version_id"],job["engine_commit"],job["style_id"],job["status"],job["idempotency_key"],job["request_hash"],json.dumps(job["resource_limits"],ensure_ascii=False,sort_keys=True),json.dumps(job["result_manifest"],ensure_ascii=False,sort_keys=True),job["created_at"],job["updated_at"]))
+            row=c.execute("SELECT * FROM creator_render_jobs WHERE idempotency_key=?",(job["idempotency_key"],)).fetchone()
+            if not row:raise ValueError("Render job could not be stored.")
+            if row["request_hash"]!=job["request_hash"]:raise ValueError("Idempotency key reused for a different render request.")
+            result=self._creator_render_job_row(row); result["idempotent_replay"]=cur.rowcount==0
+        return result
+
+    def get_creator_render_job(self,job_id):
+        with self._session() as c: row=c.execute("SELECT * FROM creator_render_jobs WHERE job_id=?",(job_id,)).fetchone()
+        return self._creator_render_job_row(row)
+
+    def list_creator_render_jobs(self,project_id,limit=50):
+        bounded=max(1,min(int(limit),200))
+        with self._session() as c: rows=c.execute("SELECT * FROM creator_render_jobs WHERE project_id=? ORDER BY created_at DESC LIMIT ?",(project_id,bounded)).fetchall()
+        return [self._creator_render_job_row(row) for row in rows]
+
+    def transition_creator_render_job(self,job_id,expected_status,next_status,result_manifest):
+        now=time.time()
+        with self._session() as c:
+            cur=c.execute("UPDATE creator_render_jobs SET status=?,result_manifest_json=?,updated_at=? WHERE job_id=? AND status=?",(next_status,json.dumps(result_manifest,ensure_ascii=False,sort_keys=True),now,job_id,expected_status))
+            if cur.rowcount!=1:return None
+            c.execute("INSERT INTO events(ts,event_type,payload_json) VALUES(?,?,?)",(now,"creator_render_job_transition",json.dumps({"job_id":job_id,"from":expected_status,"to":next_status},ensure_ascii=False,sort_keys=True)))
+            row=c.execute("SELECT * FROM creator_render_jobs WHERE job_id=?",(job_id,)).fetchone()
+        return self._creator_render_job_row(row)
+

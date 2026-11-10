@@ -19,6 +19,7 @@ from unexpected_runtime.providers import (
     DeterministicMockProvider,
     OpenAICompatibleProvider,
     OpenOxResponsesProvider,
+    LocalOnlyProvider,
     ProviderError,
     ProviderRouter,
     provider_router_from_env,
@@ -525,6 +526,125 @@ class CoordinatorProviderRoutingTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
             thread.join(timeout=2)
+
+
+
+class LocalOnlyProviderModeTests(unittest.TestCase):
+    def test_local_only_mode_exposes_only_loopback_route_even_when_cloud_keys_exist(self):
+        env = {
+            "UNEXPECTED_AI_MODE": "local_only",
+            "UNEXPECTED_LOCAL_BASE_URL": "http://127.0.0.1:8080/v1",
+            "UNEXPECTED_LOCAL_MODEL": "local-test-model",
+            "UNEXPECTED_PROVIDER": "mock",
+            "UNEXPECTED_DEFAULT_PROVIDER": "",
+            "OPENAI_API_KEY": "cloud-key-that-must-not-be-loaded",
+            "ANTHROPIC_API_KEY": "cloud-key-that-must-not-be-loaded",
+            "OPENROUTER_API_KEY": "cloud-key-that-must-not-be-loaded",
+            "OPENOX_API_KEY": "cloud-key-that-must-not-be-loaded",
+        }
+        with patch.dict("os.environ", env, clear=True):
+            router = provider_router_from_env()
+        self.assertEqual(set(router.providers), {"local"})
+        self.assertEqual(router.default_route, "local")
+        self.assertEqual(router.resolve().name, "local-llm")
+        status = router.status()
+        self.assertEqual(len(status), 1)
+        self.assertTrue(status[0].get("local"))
+        self.assertNotIn("cloud-key-that-must-not-be-loaded", json.dumps(status))
+
+    def test_local_only_mode_rejects_public_endpoint_and_conflicting_default(self):
+        env = {
+            "UNEXPECTED_AI_MODE": "local_only",
+            "UNEXPECTED_LOCAL_BASE_URL": "https://api.openai.com/v1",
+            "UNEXPECTED_LOCAL_MODEL": "local-test-model",
+            "UNEXPECTED_PROVIDER": "mock",
+            "UNEXPECTED_DEFAULT_PROVIDER": "",
+        }
+        with patch.dict("os.environ", env, clear=True):
+            with self.assertRaises(ProviderError):
+                provider_router_from_env()
+
+        env["UNEXPECTED_LOCAL_BASE_URL"] = "http://127.0.0.1:8080/v1"
+        env["UNEXPECTED_DEFAULT_PROVIDER"] = "openai"
+        with patch.dict("os.environ", env, clear=True):
+            with self.assertRaises(ProviderError):
+                provider_router_from_env()
+
+    def test_local_only_mode_requires_a_local_model_name(self):
+        env = {
+            "UNEXPECTED_AI_MODE": "local_only",
+            "UNEXPECTED_LOCAL_BASE_URL": "http://127.0.0.1:8080/v1",
+            "UNEXPECTED_LOCAL_MODEL": "",
+            "UNEXPECTED_PROVIDER": "mock",
+            "UNEXPECTED_DEFAULT_PROVIDER": "",
+        }
+        with patch.dict("os.environ", env, clear=True):
+            with self.assertRaises(ProviderError):
+                provider_router_from_env()
+
+    def test_local_only_mode_rejects_cloud_provider_selection(self):
+        env = {
+            "UNEXPECTED_AI_MODE": "local_only",
+            "UNEXPECTED_LOCAL_BASE_URL": "http://127.0.0.1:8080/v1",
+            "UNEXPECTED_LOCAL_MODEL": "local-test-model",
+            "UNEXPECTED_PROVIDER": "openai_compatible",
+            "UNEXPECTED_DEFAULT_PROVIDER": "",
+            "UNEXPECTED_API_KEY": "cloud-key-that-must-not-be-loaded",
+            "UNEXPECTED_BASE_URL": "https://api.openai.com/v1",
+            "UNEXPECTED_MODEL": "cloud-model",
+        }
+        with patch.dict("os.environ", env, clear=True):
+            with self.assertRaises(ProviderError):
+                provider_router_from_env()
+
+
+class LocalOnlyProviderTests(unittest.TestCase):
+    def test_request_uses_loopback_chat_completions_without_api_key(self):
+        opener = FakeOpener({"choices": [{"message": {"content": "  local answer  "}}]})
+        provider = LocalOnlyProvider("http://127.0.0.1:8080/v1", "local-test-model")
+        with patch("unexpected_runtime.providers.urllib.request.build_opener", return_value=opener) as build:
+            result = provider.generate(system_prompt="System", user_prompt="Task",
+                                       agent_id="creative-director", task_id="local-task-1", timeout=8)
+        self.assertEqual(result, "local answer")
+        self.assertEqual(opener.request.full_url, "http://127.0.0.1:8080/v1/chat/completions")
+        self.assertIsNone(opener.request.get_header("Authorization"))
+        body = json.loads(opener.request.data)
+        self.assertEqual(body["model"], "local-test-model")
+        self.assertEqual(body["messages"][1]["content"], "Task")
+        handlers = build.call_args.args
+        proxy_handlers = [handler for handler in handlers if type(handler).__name__ == "ProxyHandler"]
+        self.assertEqual(len(proxy_handlers), 1)
+        self.assertEqual(proxy_handlers[0].proxies, {})
+        self.assertTrue(any(type(handler).__name__ == "_NoRedirect" for handler in handlers))
+
+    def test_only_literal_loopback_http_urls_are_accepted(self):
+        for url in (
+            "https://127.0.0.1:8080/v1",
+            "http://localhost:8080/v1",
+            "http://192.168.1.20:8080/v1",
+            "http://user:pass@127.0.0.1:8080/v1",
+            "http://127.0.0.1:8080/v1?redirect=https://example.com",
+        ):
+            with self.subTest(url=url):
+                with self.assertRaises(ProviderError):
+                    LocalOnlyProvider(url, "local-test-model")
+        ipv6 = LocalOnlyProvider("http://[::1]:8080/v1", "local-test-model")
+        self.assertEqual(ipv6.endpoint, "http://[::1]:8080/v1/chat/completions")
+
+    def test_bad_and_oversized_local_responses_fail_closed(self):
+        provider = LocalOnlyProvider("http://127.0.0.1:8080/v1", "local-test-model")
+        for payload in ({"choices": []}, {"choices": [{"message": {"content": ""}}]}):
+            with self.subTest(payload=payload):
+                with patch("unexpected_runtime.providers.urllib.request.build_opener",
+                           return_value=FakeOpener(payload)):
+                    with self.assertRaises(ProviderError):
+                        provider.generate(system_prompt="S", user_prompt="U", agent_id="a",
+                                          task_id="t", timeout=5)
+        oversized = FakeOpener({"choices": [{"message": {"content": "x" * 1_100_000}}]})
+        with patch("unexpected_runtime.providers.urllib.request.build_opener", return_value=oversized):
+            with self.assertRaises(ProviderError):
+                provider.generate(system_prompt="S", user_prompt="U", agent_id="a",
+                                  task_id="t", timeout=5)
 
 
 if __name__ == "__main__":

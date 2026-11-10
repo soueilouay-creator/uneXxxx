@@ -8,3 +8,46 @@
 @media(max-width:1250px){.workflow-flow{grid-template-columns:repeat(4,minmax(0,1fr))}.flow-node:nth-child(4):after{display:none}}
 @media(max-width:900px){.workflow-flow{grid-template-columns:repeat(2,minmax(0,1fr))}.flow-node:after{display:none!important}.workflow-filters{grid-template-columns:1fr 1fr}}
 @media(max-width:680px){.workflow-grid,.skill-grid,.tool-grid{grid-template-columns:1fr}.workflow-flow{grid-template-columns:1fr 1fr}.workflow-metrics{grid-template-columns:1fr 1fr}.workflow-filters{grid-template-columns:1fr}.workflow-role-map,.skill-meta{grid-template-columns:1fr 1fr}}
+
+.creator-layout{display:grid;grid-template-columns:minmax(270px,.82fr) minmax(420px,1.5fr);gap:16px;align-items:start}
+.creator-column{display:grid;gap:16px;min-width:0}
+.creator-metrics{grid-template-columns:repeat(4,minmax(0,1fr))}
+.creator-form{display:grid;gap:9px}
+.creator-form label{font-size:11px;color:#b8c6d9;font-weight:650}
+.creator-form input,.creator-form textarea,.creator-form select{width:100%;background:#0c1424;border:1px solid #2a3850;border-radius:8px;color:#e6eefb;padding:10px 11px;font:inherit;font-size:12px;min-width:0}
+.creator-form textarea{resize:vertical;line-height:1.5}
+.creator-form textarea[spellcheck=false]{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:10px}
+.creator-form input:focus,.creator-form textarea:focus,.creator-form select:focus{outline:1px solid #9488ff;border-color:#9488ff}
+.creator-project-list{display:grid;gap:7px}
+.creator-project-item{display:flex;justify-content:space-between;gap:10px;align-items:center;text-align:left;width:100%;padding:11px;border:1px solid #25334a;border-radius:9px;background:#111b2d;color:#e6eefb;cursor:pointer}
+.creator-project-item.selected{border-color:#8d83eb;background:#1a2440}
+.creator-project-item span:first-child{min-width:0;display:grid;gap:4px}
+.creator-project-item b{font-size:12px}
+.creator-project-item small{font-size:10px;color:#96a7bd;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:260px}
+.creator-result{font-size:11px;color:#b9c9dc;line-height:1.5;overflow-wrap:anywhere;min-height:18px}
+.creator-subsection{border-top:1px solid #26354c;margin-top:16px;padding-top:13px}
+.creator-subsection h4,.creator-output-grid h4{font-size:12px;margin:0 0 9px;color:#dfe8f5}
+.creator-output-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.creator-preview{min-height:150px;border:1px dashed #394b67;background:#0a1323;border-radius:9px;display:flex;align-items:center;justify-content:center;padding:14px;text-align:center;color:#93a5bb;font-size:11px}
+.creator-preview-meta{display:grid;gap:7px;overflow-wrap:anywhere}
+.creator-preview-meta small{color:#92a4bc;font-size:10px}
+.creator-export-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.creator-export-card{background:#101b2d;border:1px solid #273750;border-radius:9px;padding:12px}
+.creator-export-card b{font-size:12px}
+.creator-export-card p{font-size:10px;line-height:1.5;color:#94a6bd;min-height:32px}
+.creator-export-card button:disabled{opacity:.55;cursor:not-allowed}
+.creator-form .button-row{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.creator-form .muted,.creator-subsection .muted{font-size:10px;color:#93a5bc;line-height:1.5;margin:0}
+@media(max-width:1050px){.creator-layout{grid-template-columns:1fr}.creator-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:600px){.creator-output-grid,.creator-export-grid{grid-template-columns:1fr}.creator-metrics{grid-template-columns:1fr 1fr}.creator-project-item{align-items:flex-start;flex-direction:column}}
+
+.android-lite-panel{border-color:#3a4d69;background:linear-gradient(145deg,#121f33,#101827)}
+.android-lite-panel> .heading{align-items:flex-start}
+.android-video-options{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.android-video-options>div{display:grid;gap:7px}
+.android-lite-panel .creator-form>small{display:block;color:#92a5bd;font-size:10px;line-height:1.55}
+.android-video-output{display:grid;gap:12px;margin-top:14px}
+.android-video-output video{display:block;width:min(100%,430px);max-height:680px;aspect-ratio:9/16;object-fit:contain;background:#050a12;border:1px solid #33445d;border-radius:12px}
+.android-video-meta{font-size:10px;line-height:1.6;color:#9eb1c9;overflow-wrap:anywhere;margin:0}
+.android-video-download{display:inline-flex;align-items:center;justify-content:center;width:max-content;text-decoration:none}
+@media(max-width:600px){.android-video-options{grid-template-columns:1fr}.android-video-output video{width:min(100%,360px)}}

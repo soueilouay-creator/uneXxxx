@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "comfyui_url": "http://127.0.0.1:8188",
+  "workflow_root": "workflows",
+  "tasks": {},
+  "video_fallback": "illustrated_story"
+}

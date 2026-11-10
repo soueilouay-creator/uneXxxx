@@ -1,5 +1,5 @@
 from __future__ import annotations
-import asyncio, hmac, json, os, threading, time, math
+import asyncio, hmac, json, os, threading, time, math, re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import urlsplit, parse_qs
@@ -45,6 +45,7 @@ def create_server(*, coordinator=None, api_token=None, host="127.0.0.1", port=0)
     limiter=_RateLimiter()
     lifecycle_limiter=_RateLimiter(limit=3)
     quality_limiter=_RateLimiter(limit=3)
+    android_video_limiter=_RateLimiter(limit=2)
     # Reserve one task-pool worker for ordinary /v1/invoke requests.
     lifecycle_slots=threading.BoundedSemaphore(max(1, active.max_workers - 1))
     class Handler(BaseHTTPRequestHandler):
@@ -206,6 +207,21 @@ def create_server(*, coordinator=None, api_token=None, host="127.0.0.1", port=0)
             if not self.authorize(): return
             query=parse_qs(parsed.query)
             limit=self.bounded_limit(query)
+            android_video_file=re.fullmatch(r"/v1/creator/android-videos/([0-9a-f]{32})/file",path)
+            android_video_detail=re.fullmatch(r"/v1/creator/android-videos/([0-9a-f]{32})",path)
+            if path=="/v1/creator/android-lite/status":
+                from .android_lite_video import AndroidLiteVideoCreator
+                return self.send_json(200,{"preflight":AndroidLiteVideoCreator.from_environment().preflight()})
+            if android_video_file or android_video_detail:
+                from .android_lite_video import AndroidLiteVideoCreator, AndroidLiteVideoError
+                creator=AndroidLiteVideoCreator.from_environment()
+                video_id=(android_video_file or android_video_detail).group(1)
+                try:
+                    if android_video_file:
+                        return self.send_bytes(200,creator.read_video(video_id),"video/mp4")
+                    return self.send_json(200,{"video":creator.get_video(video_id)})
+                except AndroidLiteVideoError:
+                    return self.send_json(404,{"error":"Android Lite video was not found or failed checksum verification."})
             if path=="/v1/status":
                 raw=active.status()
                 provider=getattr(active,"provider",None)
@@ -226,6 +242,40 @@ def create_server(*, coordinator=None, api_token=None, host="127.0.0.1", port=0)
                     "governance":{"privileged_actions":"disabled","approval_authority":"not verified","replay_protection":"not verified"},
                     "approval_verifier_configured":bool(getattr(active,"approval_verifier",None))
                 })
+            if path=="/v1/creator/status":
+                from .creator_studio import ENGINE_COMMIT
+                service=getattr(active,"creator_studio",None)
+                dispatcher=getattr(service,"render_dispatcher",None) if service else None
+                enabled=bool(getattr(dispatcher,"enabled",False))
+                return self.send_json(200,{
+                    "engine":"lemo-opuscar","engine_commit":ENGINE_COMMIT,"upstream_license":"MIT",
+                    "renderer_configured":enabled,
+                    "renderer_status":"enabled" if enabled else "blocked",
+                    "artifact_storage_configured":bool(getattr(service,"artifact_store",None)) if service else False,
+                    "publishing_enabled":False
+                })
+            if path=="/v1/creator/projects":
+                items=active.creator_studio.list_projects(limit)
+                return self.send_json(200,{"count":len(items),"items":items})
+            project_detail=re.fullmatch(r"/v1/creator/projects/([0-9a-fA-F-]{36})",path)
+            if project_detail:
+                try:
+                    return self.send_json(200,active.creator_studio.get_project_detail(project_detail.group(1),limit))
+                except Exception as exc:
+                    from .creator_studio import CreatorStudioNotFound
+                    if isinstance(exc,CreatorStudioNotFound):
+                        return self.send_json(404,{"error":"Creator Studio project was not found."})
+                    return self.send_json(400,{"error":"Could not retrieve Creator Studio project."})
+            render_detail=re.fullmatch(r"/v1/creator/render-jobs/([A-Za-z0-9._:-]{8,128})",path)
+            if render_detail:
+                try:
+                    job=active.creator_studio.get_render_job(render_detail.group(1))
+                    return self.send_json(200,{"job":job,"progress":job.get("result_manifest") or {}})
+                except Exception as exc:
+                    from .creator_studio import CreatorStudioNotFound
+                    if isinstance(exc,CreatorStudioNotFound):
+                        return self.send_json(404,{"error":"Creator Studio render job was not found."})
+                    return self.send_json(400,{"error":"Could not retrieve Creator Studio render job."})
             if path=="/v1/skills":
                 items=[skill.public_dict() for skill in active.skills.list()]
                 return self.send_json(200,{"count":len(items),"items":items})
@@ -339,7 +389,14 @@ def create_server(*, coordinator=None, api_token=None, host="127.0.0.1", port=0)
             route=urlsplit(self.path).path
             if route == "/mcp":
                 return self.handle_mcp_post()
-            if route not in {"/v1/invoke", "/v1/lifecycle", "/v1/providers/test", "/v1/improvements/propose", "/v1/quality-evaluations", "/v1/subagents/run"}: return self.send_json(404,{"error":"Not found."})
+            creator_match=re.fullmatch(r"/v1/creator/projects/([0-9a-fA-F-]{36})/(versions|render-jobs|produce)",route)
+            is_creator_project=route=="/v1/creator/projects"
+            is_creator_version=bool(creator_match and creator_match.group(2)=="versions")
+            is_creator_render=bool(creator_match and creator_match.group(2)=="render-jobs")
+            is_creator_produce=bool(creator_match and creator_match.group(2)=="produce")
+            is_creator=is_creator_project or is_creator_version or is_creator_render or is_creator_produce
+            is_android_video=route=="/v1/creator/android-videos"
+            if route not in {"/v1/invoke", "/v1/lifecycle", "/v1/providers/test", "/v1/improvements/propose", "/v1/quality-evaluations", "/v1/subagents/run"} and not is_creator and not is_android_video: return self.send_json(404,{"error":"Not found."})
             is_lifecycle=route=="/v1/lifecycle"
             is_provider_test=route=="/v1/providers/test"
             is_improvement_propose=route=="/v1/improvements/propose"
@@ -347,10 +404,90 @@ def create_server(*, coordinator=None, api_token=None, host="127.0.0.1", port=0)
             is_subagents_run=route=="/v1/subagents/run"
             if not self.authorize(): return
             identity=self.client_address[0] if self.client_address else "unknown"
-            active_limiter=lifecycle_limiter if is_lifecycle else (quality_limiter if is_quality_evaluation else limiter)
+            active_limiter=android_video_limiter if is_android_video else (lifecycle_limiter if is_lifecycle else (quality_limiter if is_quality_evaluation else limiter))
             if not active_limiter.allow(identity): return self.send_json(429,{"error":"Request rate limit exceeded."})
             body=self.read_body()
             if body is None: return
+            if is_android_video:
+                allowed={"title","script","format","narration"}
+                if set(body)-allowed:
+                    return self.send_json(400,{"error":"Unsupported Android Lite video fields."})
+                try:
+                    from .android_lite_video import AndroidLiteVideoCreator, AndroidLiteVideoError
+                    creator=AndroidLiteVideoCreator.from_environment()
+                    video=creator.render(
+                        body.get("title"),body.get("script"),
+                        video_format=body.get("format","vertical"),
+                        narration=body.get("narration","auto"),
+                    )
+                    return self.send_json(201,{"video":video})
+                except AndroidLiteVideoError as exc:
+                    return self.send_json(409,{"blocked":True,"error":str(exc)})
+                except Exception as exc:
+                    return self.send_json(500,{"error":"Android Lite video rendering failed ("+type(exc).__name__+")."})
+            if is_creator_project:
+                allowed={"title","topic","language","channel_profile"}
+                if set(body)-allowed: return self.send_json(400,{"error":"Unsupported Creator Studio project fields."})
+                try:
+                    project=active.creator_studio.create_project(body,actor="command-center-api")
+                    return self.send_json(201,{"project":project})
+                except Exception as exc:
+                    from .creator_studio import CreatorStudioError
+                    if isinstance(exc,CreatorStudioError): return self.send_json(400,{"error":str(exc)})
+                    return self.send_json(500,{"error":"Creator Studio project creation failed."})
+            if is_creator_produce:
+                allowed={"resume"}
+                if set(body)-allowed or ("resume" in body and not isinstance(body["resume"], bool)):
+                    return self.send_json(400,{"error":"Creator Team accepts only a boolean resume field."})
+                if os.getenv("UNEXPECTED_AI_MODE", "standard").strip().lower() not in {"local_only", "local-only"}:
+                    return self.send_json(409,{"blocked":True,"error":"Creator Team requires UNEXPECTED_AI_MODE=local_only."})
+                try:
+                    result=active.creator_team.run(creator_match.group(1),actor="command-center-api",
+                                                   resume=body.get("resume",True))
+                    return self.send_json(200,{"result":result})
+                except Exception as exc:
+                    from .creator_team import CreatorTeamError
+                    if isinstance(exc,CreatorTeamError):
+                        return self.send_json(409,{"blocked":True,"error":str(exc)})
+                    return self.send_json(500,{"error":"Local Creator Team execution failed."})
+            if is_creator_version:
+                allowed={"kind","content","parent_version_id"}
+                if set(body)-allowed: return self.send_json(400,{"error":"Unsupported Creator Studio version fields."})
+                if not isinstance(body.get("kind"),str) or not isinstance(body.get("content"),dict):
+                    return self.send_json(400,{"error":"kind and object content are required."})
+                try:
+                    version=active.creator_studio.save_version(creator_match.group(1),body["kind"],body["content"],
+                        body.get("parent_version_id"),actor="command-center-api")
+                    return self.send_json(201,{"version":version})
+                except Exception as exc:
+                    from .creator_studio import CreatorStudioNotFound,CreatorStudioError
+                    if isinstance(exc,CreatorStudioNotFound): return self.send_json(404,{"error":str(exc)})
+                    if isinstance(exc,CreatorStudioError): return self.send_json(400,{"error":str(exc)})
+                    return self.send_json(500,{"error":"Creator Studio version save failed."})
+            if is_creator_render:
+                allowed={"version_id","style_id","idempotency_key","resource_limits","request"}
+                if set(body)-allowed: return self.send_json(400,{"error":"Unsupported Creator Studio render fields."})
+                for field in ("version_id","style_id","idempotency_key"):
+                    if not isinstance(body.get(field),str) or not body[field].strip():
+                        return self.send_json(400,{"error":field+" is required."})
+                try:
+                    from .creator_studio import ENGINE_COMMIT
+                    job=active.creator_studio.create_render_job({
+                        "project_id":creator_match.group(1),"version_id":body["version_id"],
+                        "engine_commit":ENGINE_COMMIT,"style_id":body["style_id"],
+                        "idempotency_key":body["idempotency_key"],
+                        "resource_limits":body.get("resource_limits",{}),"request":body.get("request",{})})
+                    if job.get("status")=="blocked":
+                        return self.send_json(503,{"blocked":True,"reason":"renderer_unavailable",
+                            "job":job,"progress":job.get("result_manifest") or {}})
+                    return self.send_json(202,{"job":job,"progress":job.get("result_manifest") or {}})
+                except Exception as exc:
+                    from .creator_studio import CreatorStudioConflict,CreatorStudioNotFound,CreatorStudioError
+                    if isinstance(exc,CreatorStudioConflict): return self.send_json(409,{"error":str(exc)})
+                    if isinstance(exc,CreatorStudioNotFound): return self.send_json(404,{"error":str(exc)})
+                    if isinstance(exc,CreatorStudioError): return self.send_json(400,{"error":str(exc)})
+                    return self.send_json(500,{"error":"Creator Studio render request failed."})
+
             if is_subagents_run:
                 allowed={"parent_task_id","parent_agent_id","children","max_depth"}
                 if set(body)-allowed:

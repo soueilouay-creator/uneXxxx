@@ -164,7 +164,7 @@ class AndroidLiteVideoCreator:
         try:
             result = self.runner(
                 command, shell=False, capture_output=True, text=True,
-                timeout=timeout, check=False, cwd=str(self.output_root),
+                timeout=timeout, check=False, cwd=str(self.output_root if self.output_root.exists() else Path.home()),
                 env=env, input=input_text,
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
@@ -236,9 +236,9 @@ class AndroidLiteVideoCreator:
             raise AndroidLiteVideoError("Video project escaped its output directory.")
         return project.resolve()
 
-    def render(self, title: str, script: str, *, format: str = "vertical",
+    def render(self, title: str, script: str, *, video_format: str = "vertical",
                narration: str = "auto") -> dict[str, Any]:
-        if format not in _ALLOWED_FORMATS:
+        if video_format not in _ALLOWED_FORMATS:
             raise AndroidLiteVideoError("Format must be vertical or landscape.")
         if narration not in {"auto", "off"}:
             raise AndroidLiteVideoError("Narration mode must be auto or off.")
@@ -262,7 +262,7 @@ class AndroidLiteVideoCreator:
         ffmpeg, ffprobe = self.which("ffmpeg"), self.which("ffprobe")
         font = self._font()
         encoder = readiness["video_encoder"]
-        width, height = _ALLOWED_FORMATS[format]
+        width, height = _ALLOWED_FORMATS[video_format]
         duration = max(30, min(60, int(math.ceil(word_count / 2.35))))
         video_id = uuid.uuid4().hex
         project = self._project_dir(video_id)
@@ -289,11 +289,11 @@ class AndroidLiteVideoCreator:
         _write_ambient_wav(ambient_file, duration)
         accent = ["0x70E1D4", "0x9B8CFF", "0xFFB86B", "0x78A8FF"]
         parts = [
-            "[0:v]drawbox=x='w*0.08+20*sin(t*0.28)':y='h*0.19':w='w*0.84':h=5:"
+            "drawbox=x='w*0.08+20*sin(t*0.28)':y='h*0.19':w='w*0.84':h=5:"
             "color=0x70E1D4@0.82:t=fill",
             "drawtext=fontfile='" + _filter_path(font) + "':textfile='"
             + _filter_path(title_file) + "':fontcolor=0x70E1D4:fontsize="
-            + ("30" if format == "vertical" else "34")
+            + ("30" if video_format == "vertical" else "34")
             + ":x=(w-text_w)/2:y=h*0.10:shadowcolor=black@0.7:shadowx=2:shadowy=2",
         ]
         scene_duration = duration / len(scenes)
@@ -338,7 +338,7 @@ class AndroidLiteVideoCreator:
             "drawbox=x=0:y=h-14:w='w*min(t/" + format(duration, ".3f")
             + ",1)':h=14:color=0x70E1D4@0.95:t=fill"
         )
-        graph = "[0:v]" + ",".join(parts[1:]) + "[v];"
+        graph = "[0:v]" + ",".join(parts) + "[v];"
         if voice_status == "generated_offline":
             graph += (
                 "[1:a]volume=1.0[voice];[2:a]volume=0.13[bed];"
@@ -391,7 +391,7 @@ class AndroidLiteVideoCreator:
                 "status": "completed",
                 "video_id": video_id,
                 "title": safe_title,
-                "format": format,
+                "format": video_format,
                 "width": width,
                 "height": height,
                 "fps": 24,

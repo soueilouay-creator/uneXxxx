@@ -41,6 +41,13 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+class _SafeMediaRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if CinematicVideoCreator._trusted_media_url(newurl):
+            return super().redirect_request(req, fp, code, msg, headers, newurl)
+        raise CinematicVideoError("Generated media redirected to a non-allowlisted host.")
+
+
 def estimate_cost_usd(duration_seconds: int, resolution: str, aspect_ratio: str = "9:16") -> float:
     if resolution not in RESOLUTIONS or aspect_ratio != "9:16":
         raise CinematicVideoError("The first cinematic profile supports vertical 9:16 at 480p or 720p.")
@@ -130,14 +137,26 @@ class CinematicVideoCreator:
         ffmpeg_ok = bool(shutil.which(self.ffmpeg) or Path(self.ffmpeg).is_file())
         ffprobe_ok = bool(shutil.which(self.ffprobe) or Path(self.ffprobe).is_file())
         font = self._find_font()
+        filters = ""
+        if ffmpeg_ok:
+            try:
+                probe = subprocess.run([self.ffmpeg, "-hide_banner", "-filters"],
+                    capture_output=True, text=True, timeout=10, check=False)
+                filters = (probe.stdout or "") + (probe.stderr or "")
+            except (OSError, subprocess.TimeoutExpired):
+                filters = ""
+        filter_checks = {name: bool(re.search(r"\\b" + name + r"\\b", filters))
+                         for name in ("drawtext", "xfade", "acrossfade")}
+        filters_ok = all(filter_checks.values())
         return {
             "provider": "fal.ai",
             "model": MODEL_ID,
             "configured": bool(self.api_key),
-            "ready": bool(self.api_key and ffmpeg_ok and ffprobe_ok and font),
+            "ready": bool(self.api_key and ffmpeg_ok and ffprobe_ok and font and filters_ok),
             "ffmpeg": ffmpeg_ok,
             "ffprobe": ffprobe_ok,
             "subtitle_font_available": bool(font),
+            "required_filters": filter_checks,
             "generation": "connected_provider",
             "storage": "local",
             "publishing": False,
@@ -253,8 +272,9 @@ class CinematicVideoCreator:
     def submit(self, payload: Any) -> dict[str, Any]:
         if not self.api_key:
             raise CinematicVideoError("fal.ai is not configured. Add FAL_KEY to the private cinematic.env file; the key is never sent to the browser.")
-        if not shutil.which(self.ffmpeg) or not shutil.which(self.ffprobe):
-            raise CinematicVideoError("FFmpeg and FFprobe are required for local film assembly.")
+        preflight = self.status()
+        if not preflight.get("ready"):
+            raise CinematicVideoError("Cinematic preflight is blocked: configure FAL_KEY and verify FFmpeg, FFprobe, drawtext, xfade, acrossfade and a local font.")
         if not isinstance(payload, dict) or set(payload) != {"quote_token", "approved_max_usd"}:
             raise CinematicVideoError("Generation requires exactly a quote token and the explicitly approved maximum cost.")
         quote = self._decode_quote(payload["quote_token"])
@@ -381,9 +401,8 @@ class CinematicVideoCreator:
 
     def _assemble(self, folder: Path, manifest: dict[str, Any]) -> None:
         segments = []
+        durations = []
         caption_path = folder / "captions.srt"
-        cues = []
-        cursor = 0.0
         for index, scene in enumerate(manifest["scenes"], 1):
             source = folder / scene["file"]
             probe = self._probe(source)
@@ -402,23 +421,39 @@ class CinematicVideoCreator:
                     "-t", f"{source_duration:.3f}", "-movflags", "+faststart", str(segment)]
             self._run(cmd, timeout=max(180, int(source_duration * 30)))
             segments.append(segment)
-            caption = scene["caption"]
-            start = cursor
-            end = cursor + source_duration
-            cues.append((index, start, max(start + 0.5, end - 0.12), caption))
-            cursor = end
+            durations.append(source_duration)
+        fade = 0.35 if len(segments) > 1 else 0.0
+        cues = []
+        cursor = 0.0
+        for index, (scene, duration) in enumerate(zip(manifest["scenes"], durations), 1):
+            end = cursor + duration
+            caption_end = end - fade - 0.04 if index < len(durations) else end - 0.12
+            cues.append((index, cursor, max(cursor + 0.5, caption_end), scene["caption"]))
+            cursor = end - fade
         caption_path.write_text(self._srt(cues), encoding="utf-8")
-        playlist = folder / "concat.txt"
-        playlist.write_text("".join("file '" + p.name + "'\n" for p in segments), encoding="utf-8")
         master = folder / "master.mp4"
         font = self._find_font()
         if not font:
             raise CinematicVideoError("A readable local font is required to burn subtitles into the cinematic master.")
-        filter_parts = []
+        command = [self.ffmpeg, "-hide_banner", "-loglevel", "error", "-y"]
+        for segment in segments:
+            command.extend(["-i", str(segment)])
+        graph = []
+        current_video = "[0:v:0]"
+        current_audio = "[0:a:0]"
+        accumulated = durations[0]
+        for index in range(1, len(segments)):
+            video_out = f"[vx{index}]"
+            audio_out = f"[ax{index}]"
+            offset = max(0.0, accumulated - fade)
+            graph.append(f"{current_video}[{index}:v:0]xfade=transition=fade:duration={fade:.3f}:offset={offset:.3f}{video_out}")
+            graph.append(f"{current_audio}[{index}:a:0]acrossfade=d={fade:.3f}:c1=tri:c2=tri{audio_out}")
+            current_video, current_audio = video_out, audio_out
+            accumulated += durations[index] - fade
+        draw_filters = []
         for index, (_, start, end, caption) in enumerate(cues, 1):
-            words = caption.split()
             lines, current = [], ""
-            for word in words:
+            for word in caption.split():
                 candidate = (current + " " + word).strip()
                 if len(candidate) > 42 and current:
                     lines.append(current); current = word
@@ -428,7 +463,7 @@ class CinematicVideoCreator:
                 lines.append(current)
             caption_file = folder / ("caption-" + str(index).zfill(2) + ".txt")
             caption_file.write_text("\n".join(lines[:2]), encoding="utf-8")
-            filter_parts.append(
+            draw_filters.append(
                 "drawtext=fontfile='" + font.replace("'", "") + "'"
                 + ":textfile='caption-" + str(index).zfill(2) + ".txt'"
                 + ":fontcolor=white:fontsize=48:borderw=3:bordercolor=black"
@@ -436,13 +471,15 @@ class CinematicVideoCreator:
                 + ":x=(w-text_w)/2:y=h-230"
                 + ":enable='between(t\\," + format(start, ".3f") + "\\," + format(end, ".3f") + ")'"
             )
-        self._run([self.ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
-                   "-f", "concat", "-safe", "1", "-i", str(playlist),
-                   "-vf", ",".join(filter_parts), "-c:v", "libx264", "-preset", "veryfast",
-                   "-crf", "20", "-c:a", "copy", "-movflags", "+faststart", str(master)],
-                  timeout=600, cwd=folder)
+        graph.append(current_video + ",".join(draw_filters) + "[vout]")
+        graph.append(current_audio + "loudnorm=I=-14:TP=-1.0:LRA=11[aout]")
+        command.extend(["-filter_complex", ";".join(graph), "-map", "[vout]", "-map", "[aout]",
+                        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+                        "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-movflags", "+faststart", str(master)])
+        self._run(command, timeout=900, cwd=folder)
         qa = self._qa(master, caption_path)
         qa["burned_in_captions"] = True
+        qa["transitions"] = {"status": "applied", "type": "crossfade", "duration_seconds": fade}
         manifest["status"] = "completed" if qa.get("status") == "passed" else "qa_failed"
         manifest["master"] = {"file": master.name, "byte_size": master.stat().st_size,
                               "sha256": self._sha(master)}
@@ -527,7 +564,7 @@ class CinematicVideoCreator:
             raise CinematicVideoError("Media download host is not allowlisted.")
         request = urllib.request.Request(url, headers={"Accept": "video/mp4"})
         try:
-            with urllib.request.urlopen(request, timeout=90) as response:
+            with urllib.request.build_opener(_SafeMediaRedirect()).open(request, timeout=90) as response:
                 mime = response.headers.get("Content-Type", "").split(";", 1)[0]
                 length = response.headers.get("Content-Length")
                 if length and int(length) > MAX_CLIP_BYTES:

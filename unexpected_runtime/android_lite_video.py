@@ -363,11 +363,13 @@ class AndroidLiteVideoCreator:
             "-i", str(ambient_file), "-filter_complex_script", str(graph_file),
             "-map", "[v]", "-map", "[a]", "-t", format(duration, ".3f"),
             "-r", "24", "-c:v", encoder, "-pix_fmt", "yuv420p",
-            "-preset", "ultrafast" if encoder == "libx264" else "medium",
-            "-crf", "24" if encoder == "libx264" else "0",
             "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart",
             str(temp_output),
         ])
+        if encoder == "libx264":
+            command[-7:-7] = ["-preset", "ultrafast", "-crf", "24"]
+        else:
+            command[-7:-7] = ["-q:v", "5"]
         try:
             self._run(command, timeout=900)
             if not temp_output.is_file() or temp_output.is_symlink() or temp_output.stat().st_size < 8192:
@@ -443,8 +445,19 @@ class AndroidLiteVideoCreator:
             except OSError:
                 pass
 
+    def _existing_project_dir(self, video_id: str) -> Path:
+        if not isinstance(video_id, str) or not _ID.fullmatch(video_id):
+            raise AndroidLiteVideoError("Invalid video ID.")
+        if self.output_root.is_symlink() or not self.output_root.is_dir():
+            raise AndroidLiteVideoError("Video record was not found.")
+        root = self.output_root.resolve()
+        project = root / video_id
+        if project.is_symlink() or not project.is_dir() or project.resolve().parent != root:
+            raise AndroidLiteVideoError("Video record was not found.")
+        return project.resolve()
+
     def get_video(self, video_id: str) -> dict[str, Any]:
-        project = self._project_dir(video_id)
+        project = self._existing_project_dir(video_id)
         manifest_path = project / "manifest.json"
         if manifest_path.is_symlink() or not manifest_path.is_file():
             raise AndroidLiteVideoError("Video record was not found.")
@@ -458,7 +471,7 @@ class AndroidLiteVideoCreator:
 
     def read_video(self, video_id: str) -> bytes:
         manifest = self.get_video(video_id)
-        project = self._project_dir(video_id)
+        project = self._existing_project_dir(video_id)
         output = project / "master.mp4"
         if output.is_symlink() or not output.is_file():
             raise AndroidLiteVideoError("Encoded MP4 file is missing or unsafe.")

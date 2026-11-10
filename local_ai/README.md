@@ -112,3 +112,12 @@ The local editing stage assembles scene videos, narration, music and SRT caption
 For machines without a compatible video model, set `"video_fallback": "illustrated_story"` in `media_workflows.json`. When image, TTS and music workflows are verified, uneXpected creates a labelled illustrated-story clip from each verified still using a deterministic local FFmpeg pan/zoom treatment. This is procedural motion, not AI video inference. The asset and its inputs are checksummed and reused after restart. The final MP4 still passes the same encoded-media QA. It never substitutes a cloud model or claims native video-model output.
 
 **Network boundary:** ComfyUI's offline flag and partner-node disablement are necessary but are not a general OS firewall. During normal generation, run local AI services with outbound network blocked by the operating system or an isolated container. The renderer Docker worker independently uses --network=none. Never use online voice, music or video APIs as a fallback.
+
+
+## Android Lite — procedural MP4 path
+
+Android Lite is separate from model-based ComfyUI workflows. It uses the installed local FFmpeg/FFprobe tools to render short 25–150 word, Latin-script videos in vertical or landscape format. It draws each script scene with the local drawtext filter, synthesizes a small original ambient audio bed, and optionally uses an already-installed `espeak-ng` binary for offline English narration.
+
+No weights or network requests are required. The video is motion-graphics typography, not AI-generated footage. The authenticated Creator Studio API checks the rendered MP4 and its SHA-256 before exposing the preview/download response. Default output is stored in `~/.unexpected/creator/android-lite`.
+
+The Android Lite preflight must report FFmpeg, FFprobe, drawtext, a local font and a supported encoder before rendering. It does not install missing packages or download fonts/models.

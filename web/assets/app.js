@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  const state = { token: "", agents: [], providers: [], tasks: [], skills: [], mcpTools: [], capabilities: [], workflowCatalog: null, inventoryErrors: {}, inventoryRequestId: 0, status: null, traceTaskId: null, traceCursor: 0, creatorProjects: [], creatorProject: null, creatorDetail: null, creatorRenderJob: null, androidVideo: null, androidVideoUrl: null };
+  const state = { token: "", agents: [], providers: [], tasks: [], skills: [], mcpTools: [], capabilities: [], workflowCatalog: null, inventoryErrors: {}, inventoryRequestId: 0, status: null, traceTaskId: null, traceCursor: 0, creatorProjects: [], creatorProject: null, creatorDetail: null, creatorRenderJob: null, androidVideo: null, androidVideoUrl: null, cinematicQuote: null, cinematicJob: null, cinematicVideoUrl: null, cinematicConfigured: false };
   const $ = (id) => document.getElementById(id);
   const esc = (v) => String(v ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   const time = (v) => { if (!v) return "—"; const n=Number(v); const d=new Date(n>1e12?n:n*1000); return Number.isNaN(d.getTime())?String(v):d.toLocaleString(); };
@@ -227,10 +227,10 @@
   async function refresh() {
     $("refresh").disabled=true;
     try {
-      const [status,agents,tasks,events,providers,caps,improvements,approvals,resources,qualityRuns,creatorProjects,creatorStatus,androidVideoStatus]=await Promise.all([
+      const [status,agents,tasks,events,providers,caps,improvements,approvals,resources,qualityRuns,creatorProjects,creatorStatus,androidVideoStatus,cinematicStatus]=await Promise.all([
         api("/v1/status"),api("/v1/agents"),api("/v1/tasks?limit=8"),api("/v1/events?limit=8"),
         api("/v1/providers"),api("/v1/capabilities"),api("/v1/improvements"),api("/v1/approvals"),
-        api("/v1/resources?limit=100"),api("/v1/quality-evaluations?limit=20"),api("/v1/creator/projects?limit=50"),api("/v1/creator/status"),api("/v1/creator/android-lite/status")
+        api("/v1/resources?limit=100"),api("/v1/quality-evaluations?limit=20"),api("/v1/creator/projects?limit=50"),api("/v1/creator/status"),api("/v1/creator/android-lite/status"),api("/v1/creator/cinematic/status")
       ]);
       state.status=status; state.agents=agents.items||[]; state.tasks=tasks.items||[]; state.capabilities=caps.items||[]; state.creatorProjects=creatorProjects.items||[];
       $("creator-engine-state").textContent=creatorStatus.renderer_configured?"Worker enabled":"Worker blocked";
@@ -240,6 +240,14 @@
         ?"Ready · offline FFmpeg"
         :"Needs setup · "+((androidPreflight.issues||[androidPreflight.reason||"local renderer unavailable"]).join(" "));
       $("android-video-preflight").className="state "+(androidPreflight.ready?"ok":"warning");
+      const cinematic=cinematicStatus.cinematic||{};
+      state.cinematicConfigured=cinematic.ready===true;
+      $("cinematic-provider-state").textContent=cinematic.ready?"Connected · Seedance 2.5":cinematic.configured?"Provider configured · media check needed":"Provider key not configured";
+      $("cinematic-provider-state").className="state "+(cinematic.ready?"ok":"warning");
+      $("cinematic-status").textContent=cinematic.ready
+        ?"AI video generation is ready. Cost quotes are free; paid rendering still requires per-job approval."
+        :"Cinematic generation is locked: "+(cinematic.configured?"FFmpeg/FFprobe readiness is incomplete.":"Add FAL_KEY to the private cinematic.env file. No key is exposed in this page.");
+      $("cinematic-generate").disabled=!(state.cinematicQuote&&$("cinematic-approve").checked&&state.cinematicConfigured);
       $("metric-health").textContent=status.health?.status||"Ready";
       $("health-note").textContent=status.health?.detail||"Runtime status received";
       $("metric-agents").textContent=agents.count??state.agents.length;
@@ -362,6 +370,99 @@
     try{await refreshCreatorJob();toast("Render progress refreshed");}
     catch(error){$("creator-render-result").textContent="Progress unavailable: "+error.message;toast(error.message);}
     finally{button.disabled=!state.creatorRenderJob?.job_id;}
+  });
+  function buildCinematicBrief() {
+    const prompts=$("cinematic-scenes").value.trim().split(/\\n\\s*\\n/).map(x=>x.trim()).filter(Boolean);
+    const captions=$("cinematic-captions").value.split(/\\r?\\n/).map(x=>x.trim()).filter(Boolean);
+    if(!prompts.length||prompts.length>12)throw new Error("Provide between 1 and 12 scene prompts.");
+    if(captions.length!==prompts.length)throw new Error("Provide exactly one caption line for every scene prompt.");
+    const duration=Number($("cinematic-duration").value);
+    return {
+      title:$("cinematic-title").value.trim(),
+      character_bible:$("cinematic-character-bible").value.trim(),
+      resolution:$("cinematic-resolution").value,
+      scenes:prompts.map((prompt,index)=>({scene_id:"scene-"+String(index+1).padStart(2,"0"),prompt,caption:captions[index],duration_seconds:duration}))
+    };
+  }
+  $("cinematic-quote").addEventListener("click",async()=>{
+    const button=$("cinematic-quote"),result=$("cinematic-quote-result");
+    button.disabled=true;result.textContent="Calculating the provider estimate…";
+    $("cinematic-approve").checked=false;$("cinematic-approve").disabled=true;
+    $("cinematic-generate").disabled=true;state.cinematicQuote=null;
+    try {
+      const brief=buildCinematicBrief();
+      const response=await api("/v1/creator/cinematic/quote",{method:"POST",body:JSON.stringify(brief)});
+      state.cinematicQuote=response.quote;
+      const q=response.quote;
+      result.textContent=q.scene_count+" scene(s) · "+q.total_seconds+" generated seconds · "+q.resolution+" vertical · estimated total $"+q.estimated_cost_usd.toFixed(2)+". Quote expires "+new Date(q.expires_at*1000).toLocaleTimeString()+".";
+      $("cinematic-approve").disabled=!state.cinematicConfigured;
+      $("cinematic-approve").parentElement.lastChild.textContent=" I approve this generation at an estimated maximum of $"+q.estimated_cost_usd.toFixed(2)+".";
+      $("cinematic-status").textContent=state.cinematicConfigured?"Review the estimate and check the approval box to enable generation.":"Quote created, but provider credentials are not configured. No generation has started.";
+      toast("Cinematic cost quote calculated");
+    } catch(error) {
+      result.textContent="Could not quote this brief: "+error.message;
+      toast(error.message);
+    } finally {button.disabled=false;}
+  });
+  $("cinematic-approve").addEventListener("change",()=>{
+    $("cinematic-generate").disabled=!(state.cinematicQuote&&$("cinematic-approve").checked&&state.cinematicConfigured);
+  });
+  async function loadCinematicVideo(job) {
+    const response=await fetch("/v1/creator/cinematic/jobs/"+encodeURIComponent(job.job_id)+"/file",{
+      headers:{Authorization:"Bearer "+state.token},cache:"no-store"
+    });
+    if(!response.ok)throw new Error("The cinematic master is not available for download ("+response.status+").");
+    const blob=await response.blob();
+    if(state.cinematicVideoUrl)URL.revokeObjectURL(state.cinematicVideoUrl);
+    state.cinematicVideoUrl=URL.createObjectURL(blob);
+    const video=document.createElement("video");video.controls=true;video.playsInline=true;video.preload="metadata";video.src=state.cinematicVideoUrl;
+    const meta=document.createElement("p");meta.className="android-video-meta";
+    meta.textContent=job.total_seconds+" requested seconds · "+job.resolution+" source · QA "+(job.qa?.status||"not available")+" · file "+(job.master?.byte_size||blob.size)+" bytes";
+    const download=document.createElement("a");download.className="button primary android-video-download";
+    download.href=state.cinematicVideoUrl;download.download="uneXpected-cinematic-"+job.job_id+".mp4";download.textContent="Download cinematic MP4 ↓";
+    $("cinematic-output").replaceChildren(video,meta,download);
+  }
+  async function pollCinematicVideo(jobId) {
+    try {
+      const response=await api("/v1/creator/cinematic/jobs/"+encodeURIComponent(jobId));
+      const job=response.job;state.cinematicJob=job;
+      const counts={queued:0,generating:0,downloaded:0,failed:0};
+      (job.scenes||[]).forEach(scene=>{if(counts[scene.status]!==undefined)counts[scene.status]++;});
+      $("cinematic-status").textContent="Job "+job.job_id+" · "+job.status+" · "+counts.downloaded+"/"+job.scenes.length+" scenes downloaded · "+counts.generating+" generating · "+counts.queued+" queued.";
+      $("cinematic-output").textContent="AI scenes are generated individually, then assembled and inspected locally. Publishing remains disabled.";
+      if(job.status==="completed"||job.status==="qa_failed") {
+        await loadCinematicVideo(job);
+        $("cinematic-status").textContent=job.status==="completed"
+          ?"Cinematic master assembled and technical QA passed. Watch it and review its visual/story continuity before accepting it."
+          :"MP4 assembled, but technical QA did not pass. Review the recorded QA report before using it.";
+        return;
+      }
+      if(["partial_failed","partial_submission_uncertain","failed"].includes(job.status))return;
+      window.setTimeout(()=>pollCinematicVideo(jobId),12000);
+    } catch(error) {
+      $("cinematic-status").textContent="Job status could not refresh: "+error.message+". Use Refresh page to check again.";
+    }
+  }
+  $("cinematic-generate").addEventListener("click",async()=>{
+    const button=$("cinematic-generate");
+    if(!state.cinematicQuote||!$("cinematic-approve").checked||!state.cinematicConfigured)return;
+    button.disabled=true;$("cinematic-status").textContent="Submitting approved scene jobs to Seedance 2.5…";
+    try {
+      const q=state.cinematicQuote;
+      const response=await api("/v1/creator/cinematic/jobs",{method:"POST",body:JSON.stringify({
+        quote_token:q.quote_token,approved_max_usd:q.estimated_cost_usd
+      })});
+      state.cinematicJob=response.job;state.cinematicQuote=null;
+      $("cinematic-approve").checked=false;
+      $("cinematic-quote-result").textContent="Quote used · estimated cost $"+response.job.estimated_cost_usd.toFixed(2);
+      $("cinematic-output").textContent="Provider job submitted. The page will check scene progress and assemble returned clips locally.";
+      toast("Cinematic generation submitted");
+      await pollCinematicVideo(response.job.job_id);
+    } catch(error) {
+      $("cinematic-status").textContent="Generation was not confirmed: "+error.message;
+      toast(error.message);
+      $("cinematic-generate").disabled=!(state.cinematicQuote&&$("cinematic-approve").checked&&state.cinematicConfigured);
+    }
   });
   $("android-video-form").addEventListener("submit",async e=>{
     e.preventDefault();

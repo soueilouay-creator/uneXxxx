@@ -51,3 +51,11 @@
 .android-video-meta{font-size:10px;line-height:1.6;color:#9eb1c9;overflow-wrap:anywhere;margin:0}
 .android-video-download{display:inline-flex;align-items:center;justify-content:center;width:max-content;text-decoration:none}
 @media(max-width:600px){.android-video-options{grid-template-columns:1fr}.android-video-output video{width:min(100%,360px)}}
+
+.cinematic-panel{border-color:#625d9b;background:linear-gradient(145deg,#1a2036,#111a2a)}
+.cinematic-panel> .heading{align-items:flex-start}
+.cinematic-panel .creator-form>small{display:block;color:#a0b1c8;font-size:10px;line-height:1.6}
+.cinematic-approval{display:flex!important;align-items:flex-start;gap:9px;padding:12px;border:1px solid #695b38;border-radius:9px;background:#292316;color:#f0d59a!important;line-height:1.5}
+.cinematic-approval input{width:auto!important;min-width:18px;height:18px;margin:1px 0 0;accent-color:#d2ac5a}
+#cinematic-quote-result{padding:10px;border-radius:8px;background:#0d1524;border:1px solid #34415a}
+#cinematic-status{padding:5px 0}

@@ -28,6 +28,7 @@ MAX_SCENES = 12
 MAX_PROMPT_CHARS = 5000
 MAX_CHARACTER_BIBLE_CHARS = 3000
 MAX_CLIP_BYTES = 250 * 1024 * 1024
+MAX_JOB_BYTES = 750 * 1024 * 1024
 MAX_TOTAL_SECONDS = 180
 QUOTE_TTL_SECONDS = 900
 
@@ -383,6 +384,13 @@ class CinematicVideoCreator:
                     raise CinematicVideoError("Provider result did not contain a trusted media URL.")
                 target = folder / (scene["scene_id"] + ".mp4")
                 self._download(url, target)
+                total_downloaded = sum(
+                    int(item.get("byte_size", 0)) for item in manifest["scenes"]
+                    if item.get("status") == "downloaded"
+                ) + target.stat().st_size
+                if total_downloaded > MAX_JOB_BYTES:
+                    target.unlink(missing_ok=True)
+                    raise CinematicVideoError("Cinematic job exceeded the 750 MB local storage limit.")
                 scene["status"] = "downloaded"
                 scene["file"] = target.name
                 scene["byte_size"] = target.stat().st_size
@@ -395,7 +403,12 @@ class CinematicVideoCreator:
                 self._save(folder, manifest)
         statuses = [x.get("status") for x in manifest["scenes"]]
         if statuses and all(x == "downloaded" for x in statuses):
-            self._assemble(folder, manifest)
+            try:
+                self._assemble(folder, manifest)
+            except Exception as exc:
+                manifest["status"] = "assembly_failed"
+                manifest["assembly_error"] = type(exc).__name__
+                self._save(folder, manifest)
         elif any(x == "failed" for x in statuses):
             manifest["status"] = "partial_failed"
             self._save(folder, manifest)

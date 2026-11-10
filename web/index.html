@@ -125,6 +125,21 @@
 </form>
 <div class="creator-subsection"><div class="heading"><div><p class="eyebrow">VERSION HISTORY</p><h4>Saved versions</h4></div></div><div id="creator-versions" class="list"><div class="empty">No project selected.</div></div></div>
 </article>
+<article class="panel android-lite-panel">
+<div class="heading"><div><p class="eyebrow">ON-DEVICE VIDEO CREATOR</p><h3>Android Lite · local MP4</h3><p>Turn a short script into animated story typography, a local ambient audio bed and an MP4. No model downloads, cloud rendering or publishing.</p></div><span class="state ok">FFmpeg · offline</span></div>
+<form id="android-video-form" class="creator-form">
+<label for="android-video-title">Video title</label><input id="android-video-title" maxlength="120" required value="The Clockwork Secret" placeholder="Give your video a title">
+<label for="android-video-script">Script · 25–150 words</label><textarea id="android-video-script" rows="6" maxlength="12000" required placeholder="Paste your short narration or story here. uneXpected will split it into animated scenes…"></textarea>
+<div class="android-video-options">
+<div><label for="android-video-format">Video format</label><select id="android-video-format"><option value="vertical" selected>Vertical · 9:16 · Shorts / TikTok</option><option value="landscape">Landscape · 16:9</option></select></div>
+<div><label for="android-video-narration">Offline narration</label><select id="android-video-narration"><option value="auto" selected>Automatic · use eSpeak-NG when installed</option><option value="off">Off · ambient audio only</option></select></div>
+</div>
+<button class="button primary" id="android-video-create" type="submit">Create local MP4 →</button>
+<small>The renderer uses a built-in motion-graphics style. It is not AI-generated footage. Offline voice is included only when eSpeak-NG is already installed; otherwise the video still includes on-screen script and an original synthesized ambient bed.</small>
+</form>
+<div id="android-video-status" class="creator-result" role="status">Ready when your script is 25–150 words.</div>
+<div id="android-video-output" class="android-video-output"><div class="empty">Your local video preview and MP4 download will appear here.</div></div>
+</article>
 <article class="panel">
 <div class="heading"><div><p class="eyebrow">GENERATION</p><h3>Render request</h3></div><span class="state" id="creator-engine-state">Not connected</span></div>
 <div class="creator-form">

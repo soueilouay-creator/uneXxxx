@@ -129,13 +129,15 @@ class CinematicVideoCreator:
     def status(self) -> dict[str, Any]:
         ffmpeg_ok = bool(shutil.which(self.ffmpeg) or Path(self.ffmpeg).is_file())
         ffprobe_ok = bool(shutil.which(self.ffprobe) or Path(self.ffprobe).is_file())
+        font = self._find_font()
         return {
             "provider": "fal.ai",
             "model": MODEL_ID,
             "configured": bool(self.api_key),
-            "ready": bool(self.api_key and ffmpeg_ok and ffprobe_ok),
+            "ready": bool(self.api_key and ffmpeg_ok and ffprobe_ok and font),
             "ffmpeg": ffmpeg_ok,
             "ffprobe": ffprobe_ok,
+            "subtitle_font_available": bool(font),
             "generation": "connected_provider",
             "storage": "local",
             "publishing": False,
@@ -324,8 +326,8 @@ class CinematicVideoCreator:
     def read_video(self, job_id: str) -> bytes:
         folder = self._job_folder(job_id)
         manifest = self._read_manifest(folder)
-        if manifest.get("status") != "completed":
-            raise CinematicVideoError("The cinematic master is not complete and verified.")
+        if manifest.get("status") not in {"completed", "qa_failed"}:
+            raise CinematicVideoError("The cinematic master is not assembled yet.")
         record = manifest.get("master") or {}
         path = folder / "master.mp4"
         if (not path.is_file() or path.is_symlink() or path.stat().st_size != record.get("byte_size")
@@ -335,7 +337,7 @@ class CinematicVideoCreator:
 
     def _advance(self, folder: Path, manifest: dict[str, Any]) -> None:
         for scene in manifest["scenes"]:
-            if scene.get("status") != "queued":
+            if scene.get("status") not in {"queued", "generating"}:
                 continue
             request_id = scene["request_id"]
             try:
@@ -409,10 +411,38 @@ class CinematicVideoCreator:
         playlist = folder / "concat.txt"
         playlist.write_text("".join("file '" + p.name + "'\n" for p in segments), encoding="utf-8")
         master = folder / "master.mp4"
+        font = self._find_font()
+        if not font:
+            raise CinematicVideoError("A readable local font is required to burn subtitles into the cinematic master.")
+        filter_parts = []
+        for index, (_, start, end, caption) in enumerate(cues, 1):
+            words = caption.split()
+            lines, current = [], ""
+            for word in words:
+                candidate = (current + " " + word).strip()
+                if len(candidate) > 42 and current:
+                    lines.append(current); current = word
+                else:
+                    current = candidate
+            if current:
+                lines.append(current)
+            caption_file = folder / ("caption-" + str(index).zfill(2) + ".txt")
+            caption_file.write_text("\n".join(lines[:2]), encoding="utf-8")
+            filter_parts.append(
+                "drawtext=fontfile='" + font.replace("'", "") + "'"
+                + ":textfile='caption-" + str(index).zfill(2) + ".txt'"
+                + ":fontcolor=white:fontsize=48:borderw=3:bordercolor=black"
+                + ":box=1:boxcolor=black@0.52:boxborderw=16"
+                + ":x=(w-text_w)/2:y=h-230"
+                + ":enable='between(t\\," + format(start, ".3f") + "\\," + format(end, ".3f") + ")'"
+            )
         self._run([self.ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
                    "-f", "concat", "-safe", "1", "-i", str(playlist),
-                   "-c", "copy", "-movflags", "+faststart", str(master)], timeout=300)
+                   "-vf", ",".join(filter_parts), "-c:v", "libx264", "-preset", "veryfast",
+                   "-crf", "20", "-c:a", "copy", "-movflags", "+faststart", str(master)],
+                  timeout=600, cwd=folder)
         qa = self._qa(master, caption_path)
+        qa["burned_in_captions"] = True
         manifest["status"] = "completed" if qa.get("status") == "passed" else "qa_failed"
         manifest["master"] = {"file": master.name, "byte_size": master.stat().st_size,
                               "sha256": self._sha(master)}
@@ -515,6 +545,20 @@ class CinematicVideoCreator:
         except Exception as exc:
             raise CinematicVideoError(f"Scene download failed ({type(exc).__name__}).") from None
 
+    @staticmethod
+    def _find_font() -> str:
+        candidates = [
+            os.getenv("UNEXPECTED_CINEMATIC_FONT", ""),
+            "/system/fonts/Roboto-Regular.ttf",
+            "/system/fonts/NotoSans-Regular.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
+        ]
+        for value in candidates:
+            if value and Path(value).is_file() and not Path(value).is_symlink():
+                return value
+        return ""
+
     def _probe(self, path: Path) -> dict[str, Any]:
         result = self._run([self.ffprobe, "-v", "error", "-show_streams", "-show_format",
                             "-of", "json", str(path)])
@@ -526,9 +570,9 @@ class CinematicVideoCreator:
             raise CinematicVideoError("Generated scene duration is outside the accepted range.")
         return value
 
-    def _run(self, command: list[str], *, timeout: int) -> subprocess.CompletedProcess:
+    def _run(self, command: list[str], *, timeout: int, cwd: Path | None = None) -> subprocess.CompletedProcess:
         try:
-            result = subprocess.run(command, capture_output=True, text=True, timeout=timeout, check=False)
+            result = subprocess.run(command, capture_output=True, text=True, timeout=timeout, check=False, cwd=cwd)
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise CinematicVideoError(f"Local media command failed ({type(exc).__name__}).") from None
         if result.returncode != 0:

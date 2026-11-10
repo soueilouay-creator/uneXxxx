@@ -36,6 +36,11 @@ class CinematicVideoError(RuntimeError):
     """A cinematic video request was rejected or could not be verified."""
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 def estimate_cost_usd(duration_seconds: int, resolution: str, aspect_ratio: str = "9:16") -> float:
     if resolution not in RESOLUTIONS or aspect_ratio != "9:16":
         raise CinematicVideoError("The first cinematic profile supports vertical 9:16 at 480p or 720p.")

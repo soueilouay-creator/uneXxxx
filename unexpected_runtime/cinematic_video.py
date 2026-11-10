@@ -236,8 +236,9 @@ class CinematicVideoCreator:
                 raise CinematicVideoError(f"Scene {index} prompt must contain 1–5,000 characters.")
             if re.search(r"(?i)\b(?:https?|ftp|file)://", prompt):
                 raise CinematicVideoError("Scene prompts must not contain external URLs.")
-            if not isinstance(caption, str) or not caption.strip() or len(caption.strip()) > 84:
-                raise CinematicVideoError(f"Scene {index} caption must contain 1–84 characters.")
+            if (not isinstance(caption, str) or not caption.strip() or len(caption.strip()) > 84
+                    or any(len(word) > 42 for word in caption.split())):
+                raise CinematicVideoError(f"Scene {index} caption must contain 1–84 characters and readable words.")
             if isinstance(duration, bool) or not isinstance(duration, int) or not 4 <= duration <= 30:
                 raise CinematicVideoError(f"Scene {index} duration must be 4–30 whole seconds.")
             total += duration
@@ -417,7 +418,7 @@ class CinematicVideoCreator:
             cmd += ["-map", "0:v:0", "-map", "0:a:0" if has_audio else "1:a:0",
                     "-vf", vf, "-af", "loudnorm=I=-14:TP=-1.0:LRA=11,aresample=48000",
                     "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
-                    "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
+                    "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
                     "-t", f"{source_duration:.3f}", "-movflags", "+faststart", str(segment)]
             self._run(cmd, timeout=max(180, int(source_duration * 30)))
             segments.append(segment)

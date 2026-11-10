@@ -79,6 +79,37 @@ class CinematicVideoTests(unittest.TestCase):
             with self.assertRaisesRegex(CinematicVideoError, "4–30"):
                 creator.quote(bad)
 
+    def test_partial_failed_job_keeps_polling_other_submitted_scenes(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmp:
+            creator = self.creator(tmp)
+            job_id = "a" * 32
+            folder = creator.root / job_id
+            folder.mkdir(mode=0o700)
+            manifest = {
+                "job_id": job_id,
+                "status": "partial_failed",
+                "scenes": [
+                    {"scene_id": "scene-01", "status": "failed"},
+                    {"scene_id": "scene-02", "status": "queued",
+                     "request_id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"},
+                ],
+            }
+            creator._save(folder, manifest)
+            with patch.object(creator, "_api_request", return_value={"status": "IN_PROGRESS"}):
+                pending = creator.get_job(job_id)
+            self.assertEqual(pending["status"], "partial_failed")
+            self.assertEqual(pending["pending_scene_count"], 1)
+            with patch.object(creator, "_api_request", side_effect=[
+                {"status": "COMPLETED"},
+                {"data": {"video": {"url": "https://v3b.fal.media/files/test.mp4"}}},
+            ]), patch.object(creator, "_download", side_effect=lambda url, target: target.write_bytes(b"fake-mp4")):
+                finished = creator.get_job(job_id)
+            self.assertEqual(finished["status"], "partial_failed")
+            self.assertEqual(finished["pending_scene_count"], 0)
+            self.assertEqual(finished["scenes"][1]["status"], "downloaded")
+            self.assertNotIn("request_id", finished["scenes"][1])
+
     def test_status_never_exposes_provider_key(self):
         with tempfile.TemporaryDirectory() as tmp:
             status = self.creator(tmp).status()

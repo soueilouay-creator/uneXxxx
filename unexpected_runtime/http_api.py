@@ -45,6 +45,7 @@ def create_server(*, coordinator=None, api_token=None, host="127.0.0.1", port=0)
     limiter=_RateLimiter()
     lifecycle_limiter=_RateLimiter(limit=3)
     quality_limiter=_RateLimiter(limit=3)
+    android_video_limiter=_RateLimiter(limit=2)
     # Reserve one task-pool worker for ordinary /v1/invoke requests.
     lifecycle_slots=threading.BoundedSemaphore(max(1, active.max_workers - 1))
     class Handler(BaseHTTPRequestHandler):
@@ -206,6 +207,18 @@ def create_server(*, coordinator=None, api_token=None, host="127.0.0.1", port=0)
             if not self.authorize(): return
             query=parse_qs(parsed.query)
             limit=self.bounded_limit(query)
+            android_video_file=re.fullmatch(r"/v1/creator/android-videos/([0-9a-f]{32})/file",path)
+            android_video_detail=re.fullmatch(r"/v1/creator/android-videos/([0-9a-f]{32})",path)
+            if android_video_file or android_video_detail:
+                from .android_lite_video import AndroidLiteVideoCreator, AndroidLiteVideoError
+                creator=AndroidLiteVideoCreator.from_environment()
+                video_id=(android_video_file or android_video_detail).group(1)
+                try:
+                    if android_video_file:
+                        return self.send_bytes(200,creator.read_video(video_id),"video/mp4")
+                    return self.send_json(200,{"video":creator.get_video(video_id)})
+                except AndroidLiteVideoError:
+                    return self.send_json(404,{"error":"Android Lite video was not found or failed checksum verification."})
             if path=="/v1/status":
                 raw=active.status()
                 provider=getattr(active,"provider",None)
@@ -379,7 +392,8 @@ def create_server(*, coordinator=None, api_token=None, host="127.0.0.1", port=0)
             is_creator_render=bool(creator_match and creator_match.group(2)=="render-jobs")
             is_creator_produce=bool(creator_match and creator_match.group(2)=="produce")
             is_creator=is_creator_project or is_creator_version or is_creator_render or is_creator_produce
-            if route not in {"/v1/invoke", "/v1/lifecycle", "/v1/providers/test", "/v1/improvements/propose", "/v1/quality-evaluations", "/v1/subagents/run"} and not is_creator: return self.send_json(404,{"error":"Not found."})
+            is_android_video=route=="/v1/creator/android-videos"
+            if route not in {"/v1/invoke", "/v1/lifecycle", "/v1/providers/test", "/v1/improvements/propose", "/v1/quality-evaluations", "/v1/subagents/run"} and not is_creator and not is_android_video: return self.send_json(404,{"error":"Not found."})
             is_lifecycle=route=="/v1/lifecycle"
             is_provider_test=route=="/v1/providers/test"
             is_improvement_propose=route=="/v1/improvements/propose"
@@ -387,10 +401,27 @@ def create_server(*, coordinator=None, api_token=None, host="127.0.0.1", port=0)
             is_subagents_run=route=="/v1/subagents/run"
             if not self.authorize(): return
             identity=self.client_address[0] if self.client_address else "unknown"
-            active_limiter=lifecycle_limiter if is_lifecycle else (quality_limiter if is_quality_evaluation else limiter)
+            active_limiter=android_video_limiter if is_android_video else (lifecycle_limiter if is_lifecycle else (quality_limiter if is_quality_evaluation else limiter))
             if not active_limiter.allow(identity): return self.send_json(429,{"error":"Request rate limit exceeded."})
             body=self.read_body()
             if body is None: return
+            if is_android_video:
+                allowed={"title","script","format","narration"}
+                if set(body)-allowed:
+                    return self.send_json(400,{"error":"Unsupported Android Lite video fields."})
+                try:
+                    from .android_lite_video import AndroidLiteVideoCreator, AndroidLiteVideoError
+                    creator=AndroidLiteVideoCreator.from_environment()
+                    video=creator.render(
+                        body.get("title"),body.get("script"),
+                        video_format=body.get("format","vertical"),
+                        narration=body.get("narration","auto"),
+                    )
+                    return self.send_json(201,{"video":video})
+                except AndroidLiteVideoError as exc:
+                    return self.send_json(409,{"blocked":True,"error":str(exc)})
+                except Exception as exc:
+                    return self.send_json(500,{"error":"Android Lite video rendering failed ("+type(exc).__name__+")."})
             if is_creator_project:
                 allowed={"title","topic","language","channel_profile"}
                 if set(body)-allowed: return self.send_json(400,{"error":"Unsupported Creator Studio project fields."})

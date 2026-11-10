@@ -41,6 +41,8 @@ class CinematicVideoTests(unittest.TestCase):
         self.assertEqual(result["total_seconds"], 10)
         self.assertAlmostEqual(result["estimated_cost_usd"], 2.15, places=2)
         self.assertTrue(result["requires_explicit_approval"])
+        self.assertFalse(result["hard_spend_cap"])
+        self.assertTrue(result["final_billing_may_vary"])
         self.assertFalse(result["paid_generation_started"])
         self.assertIn("quote_token", result)
 

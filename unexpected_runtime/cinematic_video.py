@@ -277,12 +277,12 @@ class CinematicVideoCreator:
         preflight = self.status()
         if not preflight.get("ready"):
             raise CinematicVideoError("Cinematic preflight is blocked: configure FAL_KEY and verify FFmpeg, FFprobe, drawtext, xfade, acrossfade and a local font.")
-        if not isinstance(payload, dict) or set(payload) != {"quote_token", "approved_max_usd"}:
-            raise CinematicVideoError("Generation requires exactly a quote token and the explicitly approved maximum cost.")
+        if not isinstance(payload, dict) or set(payload) != {"quote_token", "approved_estimate_usd"}:
+            raise CinematicVideoError("Generation requires exactly a quote token and the explicitly approved estimate.")
         quote = self._decode_quote(payload["quote_token"])
-        approved = payload["approved_max_usd"]
+        approved = payload["approved_estimate_usd"]
         if isinstance(approved, bool) or not isinstance(approved, (int, float)) or round(float(approved), 2) != quote.get("estimated_cost_usd"):
-            raise CinematicVideoError("The approved maximum must exactly match the displayed quote.")
+            raise CinematicVideoError("The approved estimate must exactly match the displayed quote.")
         quote_id = quote.get("quote_id")
         if not isinstance(quote_id, str) or not re.fullmatch(r"[a-f0-9]{32}", quote_id):
             raise CinematicVideoError("The quote ID is invalid.")
@@ -303,7 +303,7 @@ class CinematicVideoCreator:
             "job_id": job_id, "title": quote["title"], "provider": "fal.ai",
             "model": MODEL_ID, "resolution": quote["resolution"], "aspect_ratio": "9:16",
             "estimated_cost_usd": quote["estimated_cost_usd"],
-            "approved_max_usd": round(float(approved), 2), "total_seconds": quote["total_seconds"],
+            "approved_estimate_usd": round(float(approved), 2), "total_seconds": quote["total_seconds"],
             "status": "submitting", "created_at": int(time.time()), "scenes": [],
             "publishing_performed": False,
         }

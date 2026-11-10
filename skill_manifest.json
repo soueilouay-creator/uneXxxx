@@ -3,9 +3,9 @@
   "skills": [
     {
       "id": "creative-media",
-      "version": "1.2.0",
+      "version": "1.3.0",
       "path": "skills/creative-media/WORKFLOW.md",
-      "sha256": "ae964a23e231b1c42ddce5e17ca780db18c21795731ff0c11ad3355267944dbb",
+      "sha256": "b476bf57142be1db242495a8c0e76cac5822e064e51aee064c918d84e666a73b",
       "agent_ids": [
         "creative-director",
         "media-producer",
@@ -40,9 +40,9 @@
         "creative media",
         "creator studio"
       ],
-      "source_ref": "uneXpected local-only Creator Studio v1.2.0; no cloud model APIs; Lemo Opuscar pinned",
+      "source_ref": "uneXpected Creator Studio v1.3.0; local-only Creator Team preserved; optional approved Seedance 2.5 connected cinematic profile",
       "status": "active",
-      "description": "Local-only governed Creator Studio with resumable role-team orchestration, local model generation, rendering and encoded-media QA.",
+      "description": "Local-only Creator Team plus an explicit, cost-gated connected cinematic profile for AI-generated moving footage, local assembly and encoded-media QA.",
       "invocation_mode": "automatic",
       "allowed_tools": [],
       "resources": [

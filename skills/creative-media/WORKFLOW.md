@@ -1,8 +1,8 @@
 # uneXpected Creator Studio — Workflow Reference v1.2.0
 
-**Purpose:** Produce original, evidence-grounded videos and platform-ready packages for YouTube and TikTok through the existing uneXpected Coordinator, using local models and local production services only.
+**Purpose:** Produce original, evidence-grounded videos and platform-ready packages for YouTube and TikTok through the existing uneXpected Coordinator. Local-only production remains the default profile; a separate, explicit connected-cinematic profile can generate real moving footage and then store and assemble it locally.
 
-## Mandatory local-only production policy
+## Local-only production policy (preserved default)
 
 - The active Creator Studio production route is local-only. Require `UNEXPECTED_AI_MODE=local_only` and the `local` provider route.
 - Never select an external AI API, hosted inference service, cloud video generator, remote TTS, remote music or remote asset store. Never fall back to mock or cloud when a local service fails.
@@ -16,7 +16,7 @@
 - The industrial-maintenance sales Skill is archived and must not be loaded for new work.
 - Keep the existing Coordinator, canonical role registry, provider router, permissions and persistent task store. This Skill does not create another agent, application or database.
 - Lemo Opuscar is a pinned code-based filmmaking engine. Its adapter reference is included below, but this Skill does not claim that the engine or an isolated renderer is installed or available.
-- No publishing, scheduling, comments, DMs, replies, paid generation, subscriptions or account changes are authorized by this Skill. Public publishing requires separate exact approval.
+- No publishing, scheduling, comments, DMs, replies, subscriptions or account changes are authorized by this Skill. Connected paid generation requires a fresh per-job cost quote and explicit owner approval before the provider is called. Public publishing requires separate exact approval.
 
 ## Role routing
 
@@ -89,3 +89,23 @@ When the brief is a narrated fiction film in the style of a long-form story chan
 
 The deterministic story-film compositor combines supplied, validated still images, narration and captions. It is not an AI story writer, image model or text-to-speech model. If a verified free/local generation route and required storage are unavailable, keep the project at treatment/storyboard stage and report the missing asset/provider instead of manufacturing placeholder deliverables.
 
+
+
+## Connected cinematic profile — Seedance 2.5
+
+This profile is separate from the local-only Creator Team. It is opt-in per video and must never be selected as a silent fallback.
+
+- First provider adapter: fal.ai `bytedance/seedance-2.5/text-to-video`. It produces actual moving scene footage with model-generated synchronized audio. It is not the Android Lite text-motion renderer.
+- Supported first release: vertical 9:16, 480p or 720p source, 4–30 seconds per scene, at most 12 scenes and 180 generated seconds per job.
+- `FAL_KEY` is read only on the runtime host from its environment or a mode-0600 private file at `~/.config/uneXpected-v8/cinematic.env`. Never expose it to browser JavaScript, logs, manifests, Git, or project bundles.
+- Cost estimation is read-only. Every quote is signed, expires after 15 minutes, is single-use, and is bound to the exact title, scene prompts, durations and resolution. Generation requires the user to acknowledge that the displayed provider estimate is not a hard spend cap and approve the quoted estimate; the backend checks that the approved estimate matches the signed quote before submitting any scene. Provider final billing may vary.
+- Provider generation is asynchronous. Scene queue IDs are private. An uncertain submission is never automatically retried because the provider may already have charged it.
+- Completed source clips are downloaded from an allowlisted provider media host into the job's local directory, checksummed, normalized, crossfaded, mixed and assembled by local FFmpeg. Captions are burned into the local master and preserved as an SRT sidecar.
+- The first release uses a shared text character bible in each scene prompt. This improves consistency guidance but does not guarantee pixel-identical faces. Reference-image conditioning and approved character model sheets are a separate upgrade.
+- Generated native audio includes scene sound and dialogue when prompted. Human review is still required for voice naturalness, lip synchronization, visual quality and character continuity. Technical FFprobe/FFmpeg QA is not a substitute for viewing and listening.
+- A failed QA result remains reviewable but must not be labelled approved. The Android Lite renderer remains a clearly labelled, local-only fallback.
+- No uploading, scheduling, account access, social actions or publishing is included.
+
+## Creator Core improvement ownership
+
+The existing `self-improvement-governor` owns evidence-based improvement proposals for the Creator Core. It coordinates with `creative-director`, `media-producer`, `voice-agent`, `system-architect`, `coding-engineer` and `code-reviewer` as needed. It must use a fixed cinematic benchmark, preserve a baseline export, compare the same scenarios before and after a change, require independent regression review, and keep a rollback target. It cannot self-authorize provider/model changes, spending, credentials, public publishing or promotion of protected changes.

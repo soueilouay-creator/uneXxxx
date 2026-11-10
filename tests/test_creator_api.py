@@ -86,7 +86,7 @@ class CreatorStudioAPITests(unittest.TestCase):
             status,created=self.request("POST","/v1/creator/android-videos",payload)
             self.assertEqual(status,201)
             self.assertEqual(created["video"]["qa"],"passed")
-            self.assertEqual(fake.request[2:],"vertical")
+            self.assertEqual(fake.request[2:],("vertical","off"))
             status,detail=self.request("GET","/v1/creator/android-videos/"+"a"*32)
             self.assertEqual(status,200)
             self.assertEqual(detail["video"]["video_id"],"a"*32)

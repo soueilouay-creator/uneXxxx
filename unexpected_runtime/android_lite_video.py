@@ -263,6 +263,12 @@ class AndroidLiteVideoCreator:
         font = self._font()
         encoder = readiness["video_encoder"]
         width, height = _ALLOWED_FORMATS[video_format]
+        left = int(width * 0.08)
+        content_width = int(width * 0.84)
+        line_y = int(height * 0.19)
+        scene_y = int(height * 0.30)
+        scene_height = int(height * 0.40)
+        counter_y = int(height * 0.84)
         duration = max(30, min(60, int(math.ceil(word_count / 2.35))))
         video_id = uuid.uuid4().hex
         project = self._project_dir(video_id)
@@ -289,8 +295,9 @@ class AndroidLiteVideoCreator:
         _write_ambient_wav(ambient_file, duration)
         accent = ["0x70E1D4", "0x9B8CFF", "0xFFB86B", "0x78A8FF"]
         parts = [
-            "drawbox=x='w*0.08':y='h*0.19':w='w*0.84':h=5:"
-            "color=0x70E1D4@0.82:t=fill",
+            "drawbox=x=" + str(left) + ":y=" + str(line_y)
+            + ":w=" + str(content_width) + ":h=5:"
+            + "color=0x70E1D4@0.82:t=fill",
             "drawtext=fontfile='" + _filter_path(font) + "':textfile='"
             + _filter_path(title_file) + "':fontcolor=0x70E1D4:fontsize="
             + ("30" if video_format == "vertical" else "34")
@@ -305,8 +312,9 @@ class AndroidLiteVideoCreator:
             scene_file.write_text(_wrap(scene, scene_width), encoding="utf-8")
             color = accent[index % len(accent)]
             parts.append(
-                "drawbox=x='w*0.08':y='h*0.30':w='w*0.84':h='h*0.40':"
-                "color=" + color + "@0.10:t=fill:enable='between(t,"
+                "drawbox=x=" + str(left) + ":y=" + str(scene_y)
+                + ":w=" + str(content_width) + ":h=" + str(scene_height)
+                + ":color=" + color + "@0.10:t=fill:enable='between(t,"
                 + format(start, ".3f") + "," + format(end, ".3f") + ")'"
             )
             parts.append(
@@ -330,19 +338,14 @@ class AndroidLiteVideoCreator:
             parts.append(
                 "drawtext=fontfile='" + _filter_path(font) + "':textfile='"
                 + _filter_path(counter) + "':fontcolor=" + color
-                + ":fontsize=22:x=(w-text_w)/2:y=h*0.84:"
+                + ":fontsize=22:x=(w-text_w)/2:y=" + str(counter_y) + ":"
                 "enable='between(t," + format(start, ".3f") + ","
                 + format(end, ".3f") + ")'"
             )
         parts.append(
-            "drawbox=x='w*0.08':y=h-24:w='w*0.84':h=4:"
-            "color=0x29364E@0.95:t=fill"
-        )
-        parts.append(
-            "drawtext=fontfile='" + _filter_path(font) + "':text='●':"
-            "fontcolor=0x70E1D4:fontsize=22:"
-            "x='w*0.08+(w*0.84-text_w)*min(t/" + format(duration, ".3f") + ",1)':"
-            "y=h-39"
+            "drawbox=x=" + str(left) + ":y=" + str(height - 24)
+            + ":w=" + str(content_width) + ":h=4:"
+            + "color=0x29364E@0.95:t=fill"
         )
         graph = "[0:v]" + ",".join(parts) + "[v];"
         if voice_status == "generated_offline":

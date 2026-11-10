@@ -209,6 +209,9 @@ def create_server(*, coordinator=None, api_token=None, host="127.0.0.1", port=0)
             limit=self.bounded_limit(query)
             android_video_file=re.fullmatch(r"/v1/creator/android-videos/([0-9a-f]{32})/file",path)
             android_video_detail=re.fullmatch(r"/v1/creator/android-videos/([0-9a-f]{32})",path)
+            if path=="/v1/creator/android-lite/status":
+                from .android_lite_video import AndroidLiteVideoCreator
+                return self.send_json(200,{"preflight":AndroidLiteVideoCreator.from_environment().preflight()})
             if android_video_file or android_video_detail:
                 from .android_lite_video import AndroidLiteVideoCreator, AndroidLiteVideoError
                 creator=AndroidLiteVideoCreator.from_environment()

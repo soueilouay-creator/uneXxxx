@@ -301,7 +301,7 @@ class AndroidLiteVideoCreator:
             start = index * scene_duration
             end = (index + 1) * scene_duration
             scene_file = work / ("scene-" + str(index + 1).zfill(2) + ".txt")
-            scene_width = 23 if format == "vertical" else 38
+            scene_width = 23 if video_format == "vertical" else 38
             scene_file.write_text(_wrap(scene, scene_width), encoding="utf-8")
             color = accent[index % len(accent)]
             parts.append(

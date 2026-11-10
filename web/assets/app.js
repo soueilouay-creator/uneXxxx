@@ -437,7 +437,10 @@
           :"MP4 assembled, but technical QA did not pass. Review the recorded QA report before using it.";
         return;
       }
-      if(["partial_failed","partial_submission_uncertain","failed","assembly_failed"].includes(job.status)){\n        if(job.status==="assembly_failed")$("cinematic-status").textContent="Scene generation finished, but local assembly failed ("+(job.assembly_error||"unknown error")+"). No verified master was created.";\n        return;\n      }
+      if(["partial_failed","partial_submission_uncertain","failed","assembly_failed"].includes(job.status)){
+        if(job.status==="assembly_failed")$("cinematic-status").textContent="Scene generation finished, but local assembly failed ("+(job.assembly_error||"unknown error")+"). No verified master was created.";
+        return;
+      }
       window.setTimeout(()=>pollCinematicVideo(jobId),12000);
     } catch(error) {
       $("cinematic-status").textContent="Job status could not refresh: "+error.message+". Use Refresh page to check again.";

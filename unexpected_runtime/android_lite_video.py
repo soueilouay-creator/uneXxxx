@@ -289,7 +289,7 @@ class AndroidLiteVideoCreator:
         _write_ambient_wav(ambient_file, duration)
         accent = ["0x70E1D4", "0x9B8CFF", "0xFFB86B", "0x78A8FF"]
         parts = [
-            "drawbox=x='w*0.08+20*sin(t*0.28)':y='h*0.19':w='w*0.84':h=5:"
+            "drawbox=x='w*0.08':y='h*0.19':w='w*0.84':h=5:"
             "color=0x70E1D4@0.82:t=fill",
             "drawtext=fontfile='" + _filter_path(font) + "':textfile='"
             + _filter_path(title_file) + "':fontcolor=0x70E1D4:fontsize="
@@ -335,8 +335,14 @@ class AndroidLiteVideoCreator:
                 + format(end, ".3f") + ")'"
             )
         parts.append(
-            "drawbox=x=0:y=h-14:w='w*min(t/" + format(duration, ".3f")
-            + ",1)':h=14:color=0x70E1D4@0.95:t=fill"
+            "drawbox=x='w*0.08':y=h-24:w='w*0.84':h=4:"
+            "color=0x29364E@0.95:t=fill"
+        )
+        parts.append(
+            "drawtext=fontfile='" + _filter_path(font) + "':text='●':"
+            "fontcolor=0x70E1D4:fontsize=22:"
+            "x='w*0.08+(w*0.84-text_w)*min(t/" + format(duration, ".3f") + ",1)':"
+            "y=h-39"
         )
         graph = "[0:v]" + ",".join(parts) + "[v];"
         if voice_status == "generated_offline":

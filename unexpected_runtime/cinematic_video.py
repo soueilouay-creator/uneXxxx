@@ -145,7 +145,7 @@ class CinematicVideoCreator:
                 filters = (probe.stdout or "") + (probe.stderr or "")
             except (OSError, subprocess.TimeoutExpired):
                 filters = ""
-        filter_checks = {name: bool(re.search(r"\\b" + name + r"\\b", filters))
+        filter_checks = {name: bool(re.search(r"\b" + name + r"\b", filters))
                          for name in ("drawtext", "xfade", "acrossfade")}
         filters_ok = all(filter_checks.values())
         return {

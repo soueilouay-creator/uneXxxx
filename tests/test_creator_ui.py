@@ -32,12 +32,13 @@ class CreatorStudioUIContractTests(unittest.TestCase):
 
 
  def test_android_lite_creator_has_script_format_preview_and_download_controls(self):
-  for marker in ("android-video-form","android-video-title","android-video-script","android-video-format","android-video-narration","android-video-output"):
+  for marker in ("android-video-form","android-video-title","android-video-script","android-video-format","android-video-narration","android-video-output","android-video-preflight"):
    self.assertIn(f'id="{marker}"',self.html)
   self.assertIn('/v1/creator/android-videos',self.js)
   self.assertIn('/file',self.js)
   self.assertIn("URL.createObjectURL",self.js)
   self.assertIn("android-video-output",self.css)
+  self.assertIn("/v1/creator/android-lite/status",self.js)
   self.assertIn("No model downloads",self.html)
 
  def test_no_publish_or_schedule_control_is_added(self):

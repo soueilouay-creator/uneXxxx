@@ -96,11 +96,11 @@ class CinematicVideoAPITests(unittest.TestCase):
             self.assertEqual(fake.quote_payload, brief)
             self.assertIsNone(fake.submit_payload)
             self.assertEqual(self.request("POST", "/v1/creator/cinematic/jobs",
-                                          {"quote_token": "signed-quote", "approved_max_usd": 1.08, "publish": True})[0], 400)
+                                          {"quote_token": "signed-quote", "approved_estimate_usd": 1.08, "publish": True})[0], 400)
             status, submitted = self.request("POST", "/v1/creator/cinematic/jobs",
-                                              {"quote_token": "signed-quote", "approved_max_usd": 1.08})
+                                              {"quote_token": "signed-quote", "approved_estimate_usd": 1.08})
             self.assertEqual(status, 202)
-            self.assertEqual(fake.submit_payload, {"quote_token": "signed-quote", "approved_max_usd": 1.08})
+            self.assertEqual(fake.submit_payload, {"quote_token": "signed-quote", "approved_estimate_usd": 1.08})
             status, detail = self.request("GET", "/v1/creator/cinematic/jobs/" + fake.job_id)
             self.assertEqual(status, 200)
             self.assertEqual(detail["job"]["status"], "completed")

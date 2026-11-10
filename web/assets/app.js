@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  const state = { token: "", agents: [], providers: [], tasks: [], skills: [], mcpTools: [], capabilities: [], workflowCatalog: null, inventoryErrors: {}, inventoryRequestId: 0, status: null, traceTaskId: null, traceCursor: 0, creatorProjects: [], creatorProject: null, creatorDetail: null, creatorRenderJob: null };
+  const state = { token: "", agents: [], providers: [], tasks: [], skills: [], mcpTools: [], capabilities: [], workflowCatalog: null, inventoryErrors: {}, inventoryRequestId: 0, status: null, traceTaskId: null, traceCursor: 0, creatorProjects: [], creatorProject: null, creatorDetail: null, creatorRenderJob: null, androidVideo: null, androidVideoUrl: null };
   const $ = (id) => document.getElementById(id);
   const esc = (v) => String(v ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   const time = (v) => { if (!v) return "—"; const n=Number(v); const d=new Date(n>1e12?n:n*1000); return Number.isNaN(d.getTime())?String(v):d.toLocaleString(); };
@@ -357,6 +357,46 @@
     try{await refreshCreatorJob();toast("Render progress refreshed");}
     catch(error){$("creator-render-result").textContent="Progress unavailable: "+error.message;toast(error.message);}
     finally{button.disabled=!state.creatorRenderJob?.job_id;}
+  });
+  $("android-video-form").addEventListener("submit",async e=>{
+    e.preventDefault();
+    const button=$("android-video-create"),status=$("android-video-status"),output=$("android-video-output");
+    const script=$("android-video-script").value.trim();
+    const words=script?script.split(/\s+/).length:0;
+    if(words<25||words>150){status.textContent="Use a script between 25 and 150 words.";return;}
+    button.disabled=true;status.textContent="Rendering locally with FFmpeg. This can take a little while on a phone.";
+    output.textContent="Preparing scenes and encoding the MP4…";
+    try {
+      const response=await api("/v1/creator/android-videos",{method:"POST",body:JSON.stringify({
+        title:$("android-video-title").value.trim(),script,
+        format:$("android-video-format").value,narration:$("android-video-narration").value
+      })});
+      const video=response.video||{};
+      const fileResponse=await fetch("/v1/creator/android-videos/"+encodeURIComponent(video.video_id)+"/file",{
+        headers:{Authorization:"Bearer "+state.token},cache:"no-store"
+      });
+      if(!fileResponse.ok)throw new Error("The MP4 was created but its download endpoint returned "+fileResponse.status+".");
+      const blob=await fileResponse.blob();
+      if(state.androidVideoUrl)URL.revokeObjectURL(state.androidVideoUrl);
+      state.androidVideoUrl=URL.createObjectURL(blob);state.androidVideo=video;
+      const player=document.createElement("video");
+      player.controls=true;player.playsInline=true;player.preload="metadata";player.src=state.androidVideoUrl;
+      const meta=document.createElement("p");
+      meta.className="android-video-meta";
+      meta.textContent=video.duration_seconds+" seconds · "+video.width+"×"+video.height+" · "+video.video_codec+" · QA "+video.qa+
+        " · narration: "+video.narration;
+      const download=document.createElement("a");
+      download.className="button primary android-video-download";
+      download.href=state.androidVideoUrl;download.download="uneXpected-"+video.video_id+".mp4";
+      download.textContent="Download MP4 ↓";
+      output.replaceChildren(player,meta,download);
+      status.textContent="Video rendered and verified · "+video.byte_size+" bytes · SHA-256 "+video.sha256;
+      toast("Local MP4 created");
+    } catch(error) {
+      status.textContent="Video creation or retrieval failed: "+error.message;
+      output.textContent="No verified preview is available.";
+      toast(error.message);
+    } finally {button.disabled=false;}
   });
   $("provider-grid").addEventListener("click",async e=>{
     const button=e.target.closest("[data-test-provider]");

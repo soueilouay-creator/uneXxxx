@@ -173,7 +173,7 @@ class AndroidLiteVideoCreator:
             ) from None
         if result.returncode != 0:
             detail = (result.stderr or result.stdout or "local media command failed").strip()
-            detail = " ".join(detail.splitlines())[-360:]
+            detail = " | ".join(line.strip() for line in detail.splitlines()[-6:])[-1200:]
             raise AndroidLiteVideoError(detail or "Local media command failed.")
         return result
 
@@ -362,14 +362,15 @@ class AndroidLiteVideoCreator:
         command.extend([
             "-i", str(ambient_file), "-filter_complex_script", str(graph_file),
             "-map", "[v]", "-map", "[a]", "-t", format(duration, ".3f"),
-            "-r", "24", "-c:v", encoder, "-pix_fmt", "yuv420p",
+            "-r", "24", "-c:v", encoder,
+            *(
+                ["-preset", "ultrafast", "-crf", "24"]
+                if encoder == "libx264" else ["-q:v", "5"]
+            ),
+            "-pix_fmt", "yuv420p",
             "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart",
             str(temp_output),
         ])
-        if encoder == "libx264":
-            command[-7:-7] = ["-preset", "ultrafast", "-crf", "24"]
-        else:
-            command[-7:-7] = ["-q:v", "5"]
         try:
             self._run(command, timeout=900)
             if not temp_output.is_file() or temp_output.is_symlink() or temp_output.stat().st_size < 8192:

@@ -125,6 +125,29 @@
 </form>
 <div class="creator-subsection"><div class="heading"><div><p class="eyebrow">VERSION HISTORY</p><h4>Saved versions</h4></div></div><div id="creator-versions" class="list"><div class="empty">No project selected.</div></div></div>
 </article>
+<article class="panel cinematic-panel">
+<div class="heading"><div><p class="eyebrow">AI-GENERATED CINEMATIC FOOTAGE</p><h3>AI Cinematic Studio · Seedance 2.5</h3><p>Generate actual moving scenes with synchronized model audio, then download and assemble the scenes locally on this device.</p></div><span class="state" id="cinematic-provider-state">Checking provider…</span></div>
+<form id="cinematic-form" class="creator-form">
+<label for="cinematic-title">Episode / video title</label><input id="cinematic-title" maxlength="160" required value="The Hidden Crown">
+<label for="cinematic-character-bible">Character & world continuity bible</label><textarea id="cinematic-character-bible" rows="3" maxlength="3000" placeholder="Describe each recurring character's face, age, hair, clothing, voice, personality and the world rules. Reuse these exact details in every scene.">Mira is a young woman with an auburn braid, expressive green eyes and a deep green travelling cloak with a silver clasp. Keep her face, hair, costume and proportions identical in every scene. Cinematic live-action fantasy drama, realistic skin and natural movement.</textarea>
+<label for="cinematic-scenes">Scene prompts · separate scenes with a blank line</label><textarea id="cinematic-scenes" rows="7" required placeholder="Describe one moving cinematic scene per paragraph. Include action, expression, setting, lighting and camera movement.">Mira enters the candlelit great hall of an ancient castle. Dust floats through shafts of moonlight. She walks slowly toward a weathered throne, her green cloak moving naturally. Wide establishing shot that slowly dollies into a close-up of her worried face.
+
+A shadow moves behind the throne. Mira turns sharply and whispers, "I know you're here." A mysterious figure steps into the candlelight. Tight over-the-shoulder shot, tense eye contact, realistic facial expressions and dramatic camera push-in.</textarea>
+<label for="cinematic-captions">Matching scene captions · one per line</label><textarea id="cinematic-captions" rows="3" required placeholder="One concise subtitle for each scene.">The crown had been hidden for a thousand years.
+But someone was already waiting.</textarea>
+<div class="android-video-options">
+<div><label for="cinematic-duration">Seconds per scene</label><select id="cinematic-duration"><option value="5" selected>5 seconds</option><option value="8">8 seconds</option><option value="10">10 seconds</option><option value="15">15 seconds</option><option value="20">20 seconds</option><option value="30">30 seconds</option></select></div>
+<div><label for="cinematic-resolution">Generation resolution</label><select id="cinematic-resolution"><option value="480p" selected>480p · lower cost</option><option value="720p">720p · higher detail</option></select></div>
+</div>
+<div class="button-row"><button class="button secondary" id="cinematic-quote" type="button">Calculate generation cost</button><span class="muted">No credits are used for a quote.</span></div>
+<div id="cinematic-quote-result" class="creator-result" role="status">Prepare 1–12 scenes to calculate an estimate.</div>
+<label class="cinematic-approval"><input id="cinematic-approve" type="checkbox" disabled> I explicitly approve this quoted generation cost.</label>
+<button class="button primary" id="cinematic-generate" type="button" disabled>Generate real AI video scenes →</button>
+<small>Generation is a paid external service. Nothing is submitted until you calculate the quote, review the price and check the approval box. Clips are downloaded and assembled locally. Publishing is disabled. The first version uses a shared text character bible; reference-image identity locking is a later enhancement.</small>
+</form>
+<div id="cinematic-status" class="creator-result" role="status">Waiting for a cost quote.</div>
+<div id="cinematic-output" class="android-video-output"><div class="empty">Your cinematic MP4 and job status will appear here after an approved generation.</div></div>
+</article>
 <article class="panel android-lite-panel">
 <div class="heading"><div><p class="eyebrow">ON-DEVICE VIDEO CREATOR</p><h3>Android Lite · local MP4</h3><p>Turn a short script into animated story typography, a local ambient audio bed and an MP4. No model downloads, cloud rendering or publishing.</p></div><span class="state" id="android-video-preflight">Checking local FFmpeg…</span></div>
 <form id="android-video-form" class="creator-form">

@@ -396,7 +396,7 @@
       const q=response.quote;
       result.textContent=q.scene_count+" scene(s) · "+q.total_seconds+" generated seconds · "+q.resolution+" vertical · estimated total $"+q.estimated_cost_usd.toFixed(2)+". Quote expires "+new Date(q.expires_at*1000).toLocaleTimeString()+".";
       $("cinematic-approve").disabled=!state.cinematicConfigured;
-      $("cinematic-approve").parentElement.lastChild.textContent=" I approve this generation at an estimated maximum of $"+q.estimated_cost_usd.toFixed(2)+".";
+      $("cinematic-approve").parentElement.lastChild.textContent=" I approve generation at an estimated cost of $"+q.estimated_cost_usd.toFixed(2)+".";
       $("cinematic-status").textContent=state.cinematicConfigured?"Review the estimate and check the approval box to enable generation.":"Quote created, but provider credentials are not configured. No generation has started.";
       toast("Cinematic cost quote calculated");
     } catch(error) {
@@ -450,7 +450,7 @@
     try {
       const q=state.cinematicQuote;
       const response=await api("/v1/creator/cinematic/jobs",{method:"POST",body:JSON.stringify({
-        quote_token:q.quote_token,approved_max_usd:q.estimated_cost_usd
+        quote_token:q.quote_token,approved_estimate_usd:q.estimated_cost_usd
       })});
       state.cinematicJob=response.job;state.cinematicQuote=null;
       $("cinematic-approve").checked=false;

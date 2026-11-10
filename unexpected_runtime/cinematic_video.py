@@ -259,7 +259,7 @@ class CinematicVideoCreator:
                 "resolution": resolution, "scenes": clean_scenes}
 
     def _decode_quote(self, token: Any) -> dict[str, Any]:
-        if not isinstance(token, str) or token.count(".") != 1 or len(token) > 40000:
+        if not isinstance(token, str) or token.count(".") != 1 or len(token) > 100000:
             raise CinematicVideoError("A valid, unexpired cost quote is required.")
         body, signature = token.split(".", 1)
         expected = _b64(hmac.new(self.quote_secret, body.encode("ascii", "strict"), hashlib.sha256).digest())
@@ -343,7 +343,7 @@ class CinematicVideoCreator:
     def get_job(self, job_id: str) -> dict[str, Any]:
         folder = self._job_folder(job_id)
         manifest = self._read_manifest(folder)
-        if manifest["status"] in {"queued", "generating", "partial_submission_uncertain"}:
+        if manifest["status"] in {"queued", "generating", "partial_submission_uncertain", "partial_failed"}:
             self._advance(folder, manifest)
         return self._public_manifest(self._read_manifest(folder))
 
@@ -404,16 +404,27 @@ class CinematicVideoCreator:
                 manifest["status"] = "partial_failed"
                 self._save(folder, manifest)
         statuses = [x.get("status") for x in manifest["scenes"]]
-        if statuses and all(x == "downloaded" for x in statuses):
+        pending = any(status in {"queued", "generating"} for status in statuses)
+        failed = any(status in {"failed", "submission_uncertain", "submission_pending"} for status in statuses)
+        if pending:
+            manifest["status"] = (
+                "partial_submission_uncertain" if "submission_uncertain" in statuses
+                else "partial_failed" if "failed" in statuses
+                else "generating" if "generating" in statuses else "queued"
+            )
+            self._save(folder, manifest)
+        elif failed:
+            manifest["status"] = (
+                "partial_submission_uncertain" if "submission_uncertain" in statuses else "partial_failed"
+            )
+            self._save(folder, manifest)
+        elif statuses and all(status == "downloaded" for status in statuses):
             try:
                 self._assemble(folder, manifest)
             except Exception as exc:
                 manifest["status"] = "assembly_failed"
                 manifest["assembly_error"] = type(exc).__name__
                 self._save(folder, manifest)
-        elif any(x == "failed" for x in statuses):
-            manifest["status"] = "partial_failed"
-            self._save(folder, manifest)
 
     def _assemble(self, folder: Path, manifest: dict[str, Any]) -> None:
         segments = []
@@ -679,6 +690,10 @@ class CinematicVideoCreator:
         copy = json.loads(json.dumps(manifest))
         for scene in copy.get("scenes", []):
             scene.pop("request_id", None)
+        copy["pending_scene_count"] = sum(
+            1 for scene in copy.get("scenes", [])
+            if scene.get("status") in {"queued", "generating"}
+        )
         copy["publishing_performed"] = False
         return copy
 

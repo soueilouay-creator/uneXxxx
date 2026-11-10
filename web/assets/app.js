@@ -437,8 +437,10 @@
           :"MP4 assembled, but technical QA did not pass. Review the recorded QA report before using it.";
         return;
       }
-      if(["partial_failed","partial_submission_uncertain","failed","assembly_failed"].includes(job.status)){
+      if(job.status==="assembly_failed"||job.status==="failed"||
+         (["partial_failed","partial_submission_uncertain"].includes(job.status)&&!job.pending_scene_count)){
         if(job.status==="assembly_failed")$("cinematic-status").textContent="Scene generation finished, but local assembly failed ("+(job.assembly_error||"unknown error")+"). No verified master was created.";
+        else if(job.pending_scene_count===0)$("cinematic-status").textContent="This job ended with incomplete scenes. No complete master was created. Check the scene statuses before retrying; already-submitted scenes are not resubmitted.";
         return;
       }
       window.setTimeout(()=>pollCinematicVideo(jobId),12000);

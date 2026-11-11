@@ -31,6 +31,10 @@ class SQLiteWorkflowCheckpointTests(unittest.TestCase):
             )
             self.assertEqual(checkpoint["revision"], 0)
             self.assertEqual(checkpoint["status"], "running")
+            repeated = store.create_workflow_checkpoint(
+                "workflow-fixture", "a" * 64, 1, {"must_not_replace": True}
+            )
+            self.assertEqual(repeated["state"]["request"]["objective"], "synthetic fixture")
 
             first = store.begin_workflow_stage(
                 "workflow-fixture", "execute:1", 1, "b" * 64, "attempt-one"

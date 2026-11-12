@@ -1,6 +1,6 @@
 # Workflow checkpoint ledger — foundation increment
 
-**Status:** additive persistence contract implemented on the feature branch; lifecycle integration and automatic resume are not yet implemented.
+**Status:** additive persistence contract integrated with Coordinator.run_lifecycle and the authenticated /v1/lifecycle API. Completed stages replay from stored results; ambiguous in-flight stages fail closed. This is conservative restart recovery, not an exactly-once execution guarantee.
 
 ## Why this increment exists
 
@@ -37,3 +37,17 @@ No provider call, approval consumption, external write, Render restart, Neon mig
 The new deterministic SQLite tests verify restart persistence, idempotent stage acquisition, token-bound completion, optimistic revision conflict, request-hash mismatch rejection and preservation of pre-existing task/memory/event records. A PostgreSQL integration test runs against the existing ephemeral PostgreSQL CI service after the migration runner applies all sorted migrations.
 
 The populated Neon project remains read-only until a current backup/export and independent restore/read-back path are verified.
+
+
+## Lifecycle integration — 2026-11-12
+
+- Coordinator.run_lifecycle now creates a checkpoint by default in the already-configured SQLite or PostgreSQL store.
+- The workflow ID is returned in the existing lifecycle result. The authenticated /v1/lifecycle endpoint accepts an optional workflow_id (maximum 128 characters); resubmitting the same ID and identical request/configuration replays completed stages and returns a terminal result without repeating provider calls.
+- The checkpoint identity binds the original request, selected provider route, correction/improvement limits and per-stage deadline. Reusing an ID for a different identity is rejected.
+- Stage keys are deterministic within a workflow (0001:plan, 0002:execute, and so on). Each stage hash also binds its arguments. Completed stage values are restored and local coordinator context is rehydrated before later stages continue.
+- A stage still marked started is never re-executed. The lifecycle returns blocked_execution, does not run later stages or learning, and leaves the checkpoint in running for explicit reconciliation.
+- A terminal result is persisted as completed or blocked; repeat submissions return the stored result without running stage callbacks.
+
+### Remaining recovery boundary
+
+The coordinator does not yet automatically reconcile an ambiguous stage with its related task row, provider idempotency record, or external approval/action state. If a process stops after a stage begins but before the stage result is committed, an operator must inspect the task/event evidence before any future reconciliation mechanism can safely release it. No automatic lease expiry, stale-stage takeover or exactly-once external side effect is claimed.

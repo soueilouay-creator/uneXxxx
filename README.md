@@ -94,6 +94,9 @@ Example authenticated request:
 }
 ```
 
+
+The `video-clipping` Skill is an explicit, user-invoked workflow for turning authorized YouTube videos, Twitch/Kick VODs and uploaded files into reviewed vertical Shorts. It references SupoClip at a pinned upstream commit under AGPL-3.0. This is a registered workflow specification only: no SupoClip worker, remote MCP connection or V8 adapter is installed or enabled, and its `allowed_tools` list is empty. The self-hosted worker setup is deferred until the owner confirms a computer is available; paid hosting, paid APIs and publishing remain disabled.
+
 ## First business workflow: industrial-maintenance sales
 
 The hash-pinned `industrial-maintenance-sales` Skill maps the existing `sales-intel`, `business-strategist`, `maintenance-engineer`, `marketing-seo`, `data-analyst`, `project-manager`, `code-reviewer` and `self-improvement-governor` roles into one governed sales workflow. It is trigger-matched context, not an extra agent, service, CRM or connector.

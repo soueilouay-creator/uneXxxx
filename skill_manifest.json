@@ -103,6 +103,26 @@
       ],
       "source_ref": "canonical v7 runtime:self_improvement/SKILL.md",
       "status": "active"
+    },
+    {
+      "id": "video-clipping",
+      "version": "1.0.0",
+      "path": "skills/video-clipping/SKILL.md",
+      "sha256": "1eaf75f2e0aa135196614b2d5f360c2dade2fa78daf3104ef066f7e6082237fc",
+      "agent_ids": [
+        "media-producer",
+        "creative-director",
+        "research-scout",
+        "code-reviewer",
+        "project-manager"
+      ],
+      "trigger_terms": [],
+      "source_ref": "FujiwaraChoki/supoclip bedf6ce43f8fe54d736db596db1f736508b7b6ec; AGPL-3.0; workflow specification only, no worker or adapter installed",
+      "status": "active",
+      "description": "Reusable, explicitly selected video-to-Shorts workflow; SupoClip is a proposed self-hosted worker and remains unavailable until a verified V8 adapter is installed.",
+      "invocation_mode": "user_invocable",
+      "allowed_tools": [],
+      "resources": []
     }
   ]
 }

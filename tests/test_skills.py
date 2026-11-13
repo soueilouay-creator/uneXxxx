@@ -125,10 +125,10 @@ class SkillRegistryTests(unittest.TestCase):
         self.assertIsNotNone(registry.resolve('self-improvement-governor', 'Run a benchmark for a self-improvement proposal'))
         self.assertIsNone(registry.resolve('creative-media-studio', 'Create a video'))
 
-    def test_creator_studio_is_the_only_active_media_workflow_and_sales_is_archived(self):
+    def test_creator_media_skills_are_registered_and_sales_is_archived(self):
         manifest = json.loads((ROOT / 'skill_manifest.json').read_text(encoding='utf-8'))
         active_ids = {item['id'] for item in manifest['skills']}
-        self.assertEqual(active_ids, {'creative-media', 'skill-engineering', 'self-improvement'})
+        self.assertEqual(active_ids, {'creative-media', 'skill-engineering', 'self-improvement', 'video-clipping'})
 
         sales_path = ROOT / 'skills/industrial-maintenance-sales/SKILL.md'
         self.assertTrue(sales_path.is_file())

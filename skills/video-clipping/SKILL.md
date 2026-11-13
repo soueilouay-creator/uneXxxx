@@ -7,7 +7,7 @@
 
 ## Current readiness — important
 
-This Skill is registered as a workflow specification only. **No SupoClip worker, V8 adapter, remote MCP connection, or processing entitlement is currently installed or verified.** Its `allowed_tools` list is intentionally empty. The Skill cannot create, download, render, or retrieve clips until a real worker and reviewed adapter are separately implemented, enabled, authenticated, and tested.
+This Skill is registered as a workflow specification only. **No SupoClip worker or adapter is installed in V8; no remote MCP connection or processing entitlement is currently verified.** Its `allowed_tools` list is intentionally empty. The Skill cannot create, download, render, or retrieve clips until a real worker and reviewed adapter are separately implemented, enabled, authenticated, and tested.
 
 Do not claim a task has started or a clip exists unless the verified adapter returns a real task ID and the finished MP4 is retrieved and checked. When the owner confirms that a computer is available, begin with the workstation and connection preflight in this Skill. Until then, the Android phone is a control surface only; do not try to host the complete SupoClip stack on it.
 
@@ -35,7 +35,7 @@ At that revision, its README describes support for:
 - User-uploaded video files.
 - AI-assisted selection of roughly 3–7 moments, virality scoring, 9:16 framing, face-aware cropping, word-synced subtitles, hook titles and platform export presets.
 
-**Live streams themselves are not supported.** A livestream request must wait for an accessible VOD/replay or an authorized clip. Verify the supported source path again when installing because upstream behavior can change.
+**Live streams are not supported.** A livestream request must wait for an accessible VOD/replay or an authorized clip. Verify the supported source path again when installing because upstream behavior can change.
 
 SupoClip is licensed under **AGPL-3.0**. Preserve upstream notices and license terms. Before modifying or offering a modified SupoClip service to users over a network, review AGPL-3.0 source-availability obligations and retain the corresponding source for the deployed version. This Skill references the upstream project; it does not vendor SupoClip code into uneXpected.
 

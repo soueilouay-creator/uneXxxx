@@ -35,7 +35,7 @@ class VideoClippingSkillTests(unittest.TestCase):
         context = self.registry.read_context(skill)
         self.assertIn("No SupoClip worker or adapter is installed in V8", context)
         self.assertIn("Live streams are not supported", context)
-        self.assertIn("Do not publish", context)
+        self.assertIn("Do not upload, publish, schedule", context)
         self.assertIn("AGPL-3.0", context)
 
 

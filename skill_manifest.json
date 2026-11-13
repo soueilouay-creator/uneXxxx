@@ -108,7 +108,7 @@
       "id": "video-clipping",
       "version": "1.0.0",
       "path": "skills/video-clipping/SKILL.md",
-      "sha256": "1d8f2872f94ecf45cc4c160ba394b186be09366685e224ebfe3a09def3a94640",
+      "sha256": "1eaf75f2e0aa135196614b2d5f360c2dade2fa78daf3104ef066f7e6082237fc",
       "agent_ids": [
         "media-producer",
         "creative-director",

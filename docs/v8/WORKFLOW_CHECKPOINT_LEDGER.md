@@ -51,3 +51,12 @@ The populated Neon project remains read-only until a current backup/export and i
 ### Remaining recovery boundary
 
 The coordinator does not yet automatically reconcile an ambiguous stage with its related task row, provider idempotency record, or external approval/action state. If a process stops after a stage begins but before the stage result is committed, an operator must inspect the task/event evidence before any future reconciliation mechanism can safely release it. No automatic lease expiry, stale-stage takeover or exactly-once external side effect is claimed.
+
+## Storage-instance restart regression coverage — 2026-11-13
+
+Two additional lifecycle regressions now exercise the checkpointed runner through a fresh SQLite `StateStore` instance over the same persisted database file:
+
+- A completed plan stage is restored after reopening; only remaining stages execute, and delivery/learning each occur once.
+- A stage left in `started` remains ambiguous after reopening; the runner blocks before invoking any stage callback and leaves the checkpoint unchanged.
+
+This verifies storage persistence across a new runtime storage instance. It is not yet an OS-level process-kill test, a PostgreSQL multi-process race test, or proof of exactly-once external execution. Ambiguous external side effects continue to fail closed pending task/idempotency/approval reconciliation.

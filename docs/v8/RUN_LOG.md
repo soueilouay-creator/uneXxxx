@@ -24,3 +24,13 @@ This file is append-only. Each entry records one bounded engineering increment a
 - **Costs:** no new dependencies, services, provider calls or paid tests. GitHub Actions account-level billing is not visible.
 - **Next:** verify the full CI rerun, then add a process-termination/restart test that reconciles checkpoint stages with task and idempotency records before any ambiguous-stage release.
 
+## Run 5 — 2026-11-13 — Restart persistence regression coverage
+
+- **Phase:** Phase 3, durable execution.
+- **Baseline:** rechecked core `main` at `d04b651774b7699f3430dc36972c2de74c587839`; resumed draft PR #16 on `upgrade/v8-workflow-checkpoint-ledger-20261111` at `25695fd0d40075b2b8f0c8a6749b5461e9b4c189` (9 commits ahead, 0 behind; no deleted paths in the PR diff). Prior CI run [43145486051](https://github.com/soueilouay-creator/uneXxxx/actions/runs/43145486051) completed successfully: runtime job and renderer E2E job both passed; runtime suite ran 377 tests.
+- **Change:** added two deterministic regression tests to `tests/test_workflow_lifecycle.py`. They reopen the same SQLite state file through a fresh `StateStore` instance and prove (1) completed stages replay without rerunning their callbacks while later stages finish once, and (2) an ambiguous `started` stage remains blocked with no callback execution after reopening. Updated the checkpoint contract and this append-only log.
+- **Safety boundary:** these tests validate a new storage instance, not an OS process-kill test or PostgreSQL multi-process race. Ambiguous stages still fail closed; no automatic external side-effect replay or exactly-once claim is introduced.
+- **Preservation:** no existing task, memory, approval, creator record, production database, Neon branch, Render service, PWA, source archive, deployment, or secret was changed. No migration was run.
+- **Verification:** new CI is triggered by this commit; results are pending and will be recorded separately. The prior run is historical evidence only.
+- **Costs:** no new package, service, provider call, API-generation credit or infrastructure. GitHub Actions account-level billing is not visible.
+- **Next:** verify this CI run, then design a task/idempotency/approval reconciliation contract for ambiguous stages before enabling any resume behavior.

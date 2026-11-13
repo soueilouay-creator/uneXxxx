@@ -561,3 +561,100 @@ class CoordinatorLifecycleTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class WorkflowRestartPersistenceTests(unittest.TestCase):
+    def test_completed_stage_replays_after_store_instance_reopen(self):
+        from unexpected_runtime.storage import StateStore
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "state.sqlite3"
+            original_store = StateStore(path)
+            request = {"objective": "resume a completed stage after reopening storage"}
+            identity = {"request": request, "provider_route": "fixture"}
+            workflow_id = "restart-completed-stage"
+            original_store.create_workflow_checkpoint(
+                workflow_id, WorkflowRunner._canonical_hash(identity), 1,
+                {"request": identity, "completed_stages": []},
+            )
+            stage_key = "0001:plan"
+            self.assertTrue(original_store.begin_workflow_stage(
+                workflow_id, stage_key, 1,
+                WorkflowRunner._stage_hash(stage_key, (request, None)),
+                "original-plan-attempt",
+            )["can_execute"])
+            persisted_plan = {"steps": ["persisted before restart"]}
+            self.assertTrue(original_store.complete_workflow_stage(
+                workflow_id, stage_key, "original-plan-attempt", "plan-task",
+                {"value": persisted_plan},
+            ))
+            self.assertTrue(original_store.save_workflow_checkpoint(
+                workflow_id, 0, "running", stage_key,
+                {"request": identity, "completed_stages": [stage_key]},
+            ))
+
+            # A fresh store object models a new runtime process opening the same file.
+            del original_store
+            reopened_store = StateStore(path)
+            calls = []
+            result = WorkflowRunner(
+                plan=lambda *args: self.fail("persisted plan must not execute twice"),
+                execute=lambda plan: calls.append("execute") or "draft",
+                verify=lambda candidate, plan: calls.append("verify") or {
+                    "passed": True, "feedback": ""
+                },
+                improve=lambda candidate, feedback: calls.append("improve") or candidate + "-improved",
+                deliver=lambda candidate: calls.append("deliver") or {"artifact": candidate},
+                learn=lambda record: calls.append("learn"),
+                checkpoint_store=reopened_store,
+            ).run(request, workflow_id=workflow_id, checkpoint_identity=identity)
+
+            self.assertEqual(result.status, "delivered")
+            self.assertTrue(result.delivered)
+            self.assertEqual(result.plan, persisted_plan)
+            self.assertEqual(calls.count("execute"), 1)
+            self.assertEqual(calls.count("verify"), 2)
+            self.assertEqual(calls.count("improve"), 1)
+            self.assertEqual(calls.count("deliver"), 1)
+            self.assertEqual(calls.count("learn"), 1)
+            self.assertEqual(reopened_store.get_workflow_checkpoint(workflow_id)["status"], "completed")
+
+    def test_ambiguous_started_stage_stays_blocked_after_store_instance_reopen(self):
+        from unexpected_runtime.storage import StateStore
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "state.sqlite3"
+            original_store = StateStore(path)
+            request = {"objective": "never replay an ambiguous stage after reopening storage"}
+            identity = {"request": request}
+            workflow_id = "restart-ambiguous-stage"
+            original_store.create_workflow_checkpoint(
+                workflow_id, WorkflowRunner._canonical_hash(identity), 1,
+                {"request": identity, "completed_stages": []},
+            )
+            stage_key = "0001:plan"
+            original_store.begin_workflow_stage(
+                workflow_id, stage_key, 1,
+                WorkflowRunner._stage_hash(stage_key, (request, None)),
+                "abandoned-before-restart",
+            )
+
+            # A fresh store object must observe the started row and refuse replay.
+            del original_store
+            reopened_store = StateStore(path)
+            calls = []
+            result = WorkflowRunner(
+                plan=lambda *args: calls.append("plan"),
+                execute=lambda *args: calls.append("execute"),
+                verify=lambda *args: calls.append("verify"),
+                improve=lambda *args: calls.append("improve"),
+                deliver=lambda *args: calls.append("deliver"),
+                learn=lambda *args: calls.append("learn"),
+                checkpoint_store=reopened_store,
+            ).run(request, workflow_id=workflow_id, checkpoint_identity=identity)
+
+            self.assertEqual(result.status, "blocked_execution")
+            self.assertFalse(result.delivered)
+            self.assertIn("already marked started", result.error)
+            self.assertEqual(calls, [])
+            self.assertEqual(reopened_store.list_workflow_stages(workflow_id)[0]["status"], "started")
+            self.assertEqual(reopened_store.get_workflow_checkpoint(workflow_id)["status"], "running")

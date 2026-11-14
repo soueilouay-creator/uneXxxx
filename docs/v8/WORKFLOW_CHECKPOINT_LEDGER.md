@@ -74,3 +74,14 @@ Before a persisted completed stage is reused, the runner now performs read-only 
 SQLite and PostgreSQL expose the same read-only \`get_idempotency_claim\` contract. No schema migration or production database access is required for this increment.
 
 This guard reconciles completed stages that have a task reference; it does not release \`started\` stages. Those remain blocked because the task reference may not have been committed before interruption. Stages without a task reference cannot be cross-checked against the task ledger. OS-level process termination, approval-to-stage linkage, PostgreSQL multi-process crash recovery and exactly-once external effects remain open release requirements.
+
+
+## Abrupt process-termination regression — 2026-11-14
+
+A new isolated SQLite test starts a child Python process, allows the workflow runner to commit the first stage's `started` checkpoint, then terminates the child abruptly with `os._exit` from inside the stage callback. The parent opens the same database through a fresh `StateStore` and verifies:
+
+- The workflow checkpoint remains `running` and its first stage remains `started`.
+- Retrying the same workflow ID returns `blocked_execution` before any stage callback runs.
+- The original attempt token, stage status and checkpoint revision remain unchanged after the blocked retry.
+
+This proves fail-closed behavior across an actual process exit for the SQLite adapter. It does not prove PostgreSQL multi-process recovery, safe stale-stage reconciliation, task/approval linkage, or exactly-once external side effects. No production state is used; the test database is confined to a temporary directory.

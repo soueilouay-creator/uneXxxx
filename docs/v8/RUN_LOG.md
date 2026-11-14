@@ -67,3 +67,15 @@ This file is append-only. Each entry records one bounded engineering increment a
 - **Other gates:** ephemeral PostgreSQL migrations, changed-file SHA-256 inventory, runtime compile, JavaScript/YAML/Bash checks, Docker image build, actual container smoke test and CLI smoke tests all passed.
 - **Commit lineage:** implementation commit \`ea19bcb7b5830c4e62d95cd84d1ba0dde74b0f8d\`; CI-tested source/manifest head \`5e3eaa91bd3aeaa56075b18b32cd92bda995f3fb\`. Subsequent commits only append verification evidence and refresh the SHA-256 inventory; runtime source and tests were unchanged.
 - **PR #16 remains draft and unmerged.** No production deployment, production database migration, user-data migration or external provider call was performed.
+
+
+## Run 7 — 2026-11-14 — Abrupt process-termination recovery regression
+
+- **Phase:** Phase 3, durable execution.
+- **Baseline:** rechecked runtime repository default branch `main` at `d04b651774b7699f3430dc36972c2de74c587839`; resumed open draft PR #16 on `upgrade/v8-workflow-checkpoint-ledger-20261111` at `90df1e5930c5d388d64e094b9ee1080992c299bf` (24 commits ahead, 0 behind; the existing compare contained no removed paths).
+- **Change:** added `tests/test_workflow_process_recovery.py`. The test starts an isolated child Python process, commits a stage claim, terminates the child abruptly from inside the stage callback, reopens the same temporary SQLite database in the parent, and verifies that retry remains blocked without invoking any callback or changing the stage attempt token/checkpoint revision.
+- **Scope:** regression-test and documentation increment only. No production runtime implementation, schema, dependency, coordinator or approval behavior was changed. Privileged workflow recovery continues to fail closed pending durable approval-to-task/stage linkage.
+- **Verification:** CI has not yet run for this commit. Existing parent CI evidence is historical only: runtime suite 388 tests with 3 skipped, renderer E2E 2/2, ephemeral PostgreSQL migrations, inventory, Docker and CLI smoke passed on the prior tested source.
+- **Preservation:** test uses only a newly created temporary SQLite database. No existing task, event, memory, approval, Creator Studio record, user data, Neon branch, Render service, deployment, PWA, source archive, setting or secret was read or changed.
+- **Costs:** no new package, infrastructure, provider call, generation credit, paid service or database migration. GitHub Actions account-level billing is not visible.
+- **Next:** add a durable, action-digest-bound approval reference through the workflow-stage and task creation path without changing the current one-use verifier semantics; then test concurrent PostgreSQL recovery with separate connections and processes. Do not release automatic replay of ambiguous stages until these checks pass.

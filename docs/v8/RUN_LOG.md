@@ -34,3 +34,16 @@ This file is append-only. Each entry records one bounded engineering increment a
 - **Verification:** new CI is triggered by this commit; results are pending and will be recorded separately. The prior run is historical evidence only.
 - **Costs:** no new package, service, provider call, API-generation credit or infrastructure. GitHub Actions account-level billing is not visible.
 - **Next:** verify this CI run, then design a task/idempotency/approval reconciliation contract for ambiguous stages before enabling any resume behavior.
+
+
+## Run 6 — 2026-11-14 — Completed-stage recovery reconciliation guard
+
+- **Phase:** Phase 3, durable execution.
+- **Baseline:** verified core \`main\` at \`d04b651774b7699f3430dc36972c2de74c587839\`; resumed PR #16 on \`upgrade/v8-workflow-checkpoint-ledger-20261111\` at \`b8f939ebc300b37cbeae014b930a2625e856d072\` (10 commits ahead, 0 behind; compare reported no deleted paths). Verified prior CI run [43353454636](https://github.com/soueilouay-creator/uneXxxx/actions/runs/43353454636): runtime suite 379 tests, 3 skipped; renderer E2E passed.
+- **Change:** before reusing a completed stage with a task reference, WorkflowRunner now verifies the linked task row is completed and its stored result matches the task. When an idempotency key exists, the claim must be completed for the same task and match the reconstructed request hash and result. Tasks with privileged permission scopes block for human review because the current approval ledger is not durably linked to task/stage identity. Added read-only claim lookup parity to SQLite and PostgreSQL.
+- **Regression coverage:** added deterministic tests for missing/nonterminal tasks, running/mismatched idempotency claims, request-hash/result mismatches, privileged approval gaps and a valid replay path; added a PostgreSQL ephemeral-CI lookup test. Updated existing restart fixtures to seed their linked task records.
+- **Safety boundary:** all reconciliation is read-only. Started stages still fail closed. No automatic stale-stage takeover, approval release, provider retry, external write or exactly-once claim is introduced.
+- **Preservation:** existing task, memory, event, approval, Creator Studio and user records remain untouched; no migration, production database access, deployment, PWA/source archive change or secret access.
+- **Verification:** new CI is triggered by this commit; test count and result will be appended after the run completes.
+- **Costs:** no new package, service, provider call, generation credit, paid infrastructure or database migration. GitHub Actions account-level billing is not visible.
+- **Next:** add an OS-process termination test and design a durable, action-digest-bound approval reference that can be reconciled without weakening the one-use approval ledger.

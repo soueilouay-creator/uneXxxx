@@ -6,6 +6,8 @@ import hashlib
 import json
 import uuid
 
+from .permissions import PRIVILEGED
+
 
 @dataclass
 class WorkflowResult:
@@ -67,6 +69,128 @@ class WorkflowRunner:
     @staticmethod
     def _stage_hash(stage_key: str, args: tuple[Any, ...]) -> str:
         return WorkflowRunner._canonical_hash({"stage_key": stage_key, "args": list(args)})
+
+
+    @staticmethod
+    def _task_request_hash(payload: dict[str, Any]) -> str:
+        """Rebuild Coordinator.invoke's request hash from a persisted task payload."""
+        if not isinstance(payload, dict):
+            raise WorkflowCheckpointBlocked("The linked task payload is not an object.")
+        agent_id = payload.get("agent_id")
+        objective = payload.get("objective")
+        inputs = payload.get("inputs", {})
+        if not isinstance(agent_id, str) or not agent_id or not isinstance(objective, str) or not isinstance(inputs, dict):
+            raise WorkflowCheckpointBlocked("The linked task identity is malformed.")
+        list_fields = {}
+        for field_name in ("required_permissions", "source_refs", "requested_skill_ids"):
+            value = payload.get(field_name, [])
+            if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+                raise WorkflowCheckpointBlocked("The linked task payload has malformed " + field_name + ".")
+            list_fields[field_name] = value
+        identity = {
+            "agent_id": agent_id,
+            "objective": objective,
+            "inputs": inputs or {},
+            "required_permissions": list_fields["required_permissions"],
+            "source_refs": list_fields["source_refs"],
+            "provider_route": payload.get("provider_route"),
+            "requested_skill_ids": list_fields["requested_skill_ids"],
+            "parent_task_id": payload.get("parent_task_id"),
+        }
+        encoded = json.dumps(identity, sort_keys=True, ensure_ascii=False).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    def _validate_completed_stage_replay(self, stage_key: str, acquisition: dict[str, Any]) -> None:
+        """Read-only consistency gate before a completed stage is reused."""
+        task_id = acquisition.get("task_id")
+        if task_id is None:
+            return
+        if not isinstance(task_id, str) or not task_id.strip():
+            raise WorkflowCheckpointBlocked(
+                f"Completed stage {stage_key} contains a malformed task reference."
+            )
+        get_task = getattr(self.checkpoint_store, "get_task", None)
+        if not callable(get_task):
+            raise WorkflowCheckpointBlocked(
+                f"Completed stage {stage_key} cannot be reconciled because task lookup is unavailable."
+            )
+        try:
+            task = get_task(task_id)
+        except Exception as exc:
+            raise WorkflowCheckpointBlocked(
+                f"Completed stage {stage_key} task lookup failed; human review is required."
+            ) from exc
+        if not isinstance(task, dict) or task.get("task_id") != task_id:
+            raise WorkflowCheckpointBlocked(
+                f"Completed stage {stage_key} references a missing task record."
+            )
+        if task.get("status") != "completed":
+            raise WorkflowCheckpointBlocked(
+                f"Completed stage {stage_key} references a task that is not completed."
+            )
+        try:
+            payload = json.loads(task.get("payload_json") or "")
+            task_result = json.loads(task.get("result_json") or "")
+        except (TypeError, ValueError):
+            raise WorkflowCheckpointBlocked(
+                f"Completed stage {stage_key} has malformed linked task evidence."
+            ) from None
+        if (not isinstance(payload, dict) or not isinstance(task_result, dict)
+                or task_result.get("task_id") != task_id
+                or task_result.get("status") != "completed"
+                or task.get("agent_id") != payload.get("agent_id")):
+            raise WorkflowCheckpointBlocked(
+                f"Completed stage {stage_key} task result does not match its persisted task."
+            )
+
+        required_permissions = payload.get("required_permissions", [])
+        if not isinstance(required_permissions, list) or any(
+            not isinstance(permission, str) for permission in required_permissions
+        ):
+            raise WorkflowCheckpointBlocked(
+                f"Completed stage {stage_key} has malformed permission evidence."
+            )
+        protected = sorted(set(required_permissions) & PRIVILEGED)
+        if protected:
+            raise WorkflowCheckpointBlocked(
+                f"Completed stage {stage_key} requires privileged permission(s) "
+                + ", ".join(protected)
+                + "; approval consumption is not durably linked to this task, so human review is required."
+            )
+
+        idempotency_key = payload.get("idempotency_key")
+        if idempotency_key:
+            if not isinstance(idempotency_key, str) or not idempotency_key.strip():
+                raise WorkflowCheckpointBlocked(
+                    f"Completed stage {stage_key} has a malformed idempotency key."
+                )
+            get_claim = getattr(self.checkpoint_store, "get_idempotency_claim", None)
+            if not callable(get_claim):
+                raise WorkflowCheckpointBlocked(
+                    f"Completed stage {stage_key} cannot verify its idempotency claim."
+                )
+            try:
+                claim = get_claim(idempotency_key)
+            except Exception as exc:
+                raise WorkflowCheckpointBlocked(
+                    f"Completed stage {stage_key} idempotency lookup failed; human review is required."
+                ) from exc
+            if not isinstance(claim, dict):
+                raise WorkflowCheckpointBlocked(
+                    f"Completed stage {stage_key} has no persisted idempotency claim."
+                )
+            if claim.get("task_id") != task_id or claim.get("state") != "completed":
+                raise WorkflowCheckpointBlocked(
+                    f"Completed stage {stage_key} idempotency claim is not completed for the same task."
+                )
+            if claim.get("request_hash") != self._task_request_hash(payload):
+                raise WorkflowCheckpointBlocked(
+                    f"Completed stage {stage_key} idempotency request hash does not match its task."
+                )
+            if claim.get("result") != task_result:
+                raise WorkflowCheckpointBlocked(
+                    f"Completed stage {stage_key} idempotency result does not match its task result."
+                )
 
     def run(self, request: dict[str, Any], *, workflow_id: str | None = None,
             checkpoint_identity: dict[str, Any] | None = None) -> WorkflowResult:
@@ -131,6 +255,7 @@ class WorkflowRunner:
                     ) from exc
 
                 if acquisition.get("status") == "completed":
+                    self._validate_completed_stage_replay(stage_key, acquisition)
                     stored = acquisition.get("result")
                     if not isinstance(stored, dict) or "value" not in stored:
                         checkpoint_blocked = True

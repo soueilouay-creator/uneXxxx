@@ -60,3 +60,17 @@ Two additional lifecycle regressions now exercise the checkpointed runner throug
 - A stage left in `started` remains ambiguous after reopening; the runner blocks before invoking any stage callback and leaves the checkpoint unchanged.
 
 This verifies storage persistence across a new runtime storage instance. It is not yet an OS-level process-kill test, a PostgreSQL multi-process race test, or proof of exactly-once external execution. Ambiguous external side effects continue to fail closed pending task/idempotency/approval reconciliation.
+
+
+## Completed-stage task reconciliation — 2026-11-14
+
+Before a persisted completed stage is reused, the runner now performs read-only checks when the stage carries a task reference:
+
+- The referenced task row must exist, remain in \`completed\` state, and contain a parseable result bound to the same task and agent.
+- If the task has an idempotency key, the store must expose a matching claim in \`completed\` state. Its task ID, reconstructed request hash and decoded result must match the persisted task.
+- If the task requested a privileged permission, replay stops for human review. The current one-use approval ledger records approval ID and action digest separately; no durable task/stage reference exists to prove which approval authorized this task.
+- Missing lookups, malformed records, stale claims and mismatches fail closed. No task, claim, approval or checkpoint row is changed by this preflight.
+
+SQLite and PostgreSQL expose the same read-only \`get_idempotency_claim\` contract. No schema migration or production database access is required for this increment.
+
+This guard reconciles completed stages that have a task reference; it does not release \`started\` stages. Those remain blocked because the task reference may not have been committed before interruption. Stages without a task reference cannot be cross-checked against the task ledger. OS-level process termination, approval-to-stage linkage, PostgreSQL multi-process crash recovery and exactly-once external effects remain open release requirements.

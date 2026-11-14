@@ -311,7 +311,7 @@ class Coordinator:
         return out
     def run_lifecycle(self, agent_id:str, objective:str, inputs:dict[str,Any]|None=None, *,
                       max_corrections:int=1, max_improvements:int=3, deadline_seconds:float=60.0,
-                      provider_route:str|None=None):
+                      provider_route:str|None=None, workflow_id:str|None=None):
         """Run Request -> Plan -> Execute -> Verify -> Improve & Deliver -> Learn.
 
         The planner, worker, and independent reviewer are real registered roles.
@@ -331,7 +331,10 @@ class Coordinator:
         if inputs is not None and not isinstance(inputs, dict):
             raise TypeError("inputs must be a dictionary.")
         request = {"agent_id": agent_id, "objective": objective, "inputs": dict(inputs or {})}
-        workflow_id = str(uuid.uuid4())
+        if workflow_id is None:
+            workflow_id = str(uuid.uuid4())
+        elif (not isinstance(workflow_id, str) or not workflow_id.strip() or len(workflow_id) > 128):
+            raise ValueError("workflow_id must be a non-empty string of at most 128 characters.")
         effective_provider_route = provider_route
         if hasattr(self.provider, "resolve"):
             effective_provider_route = provider_route or getattr(self.provider, "default_route", None)
@@ -484,10 +487,42 @@ class Coordinator:
                                       "max_improvements": max_improvements})
         record_stage("request", "accepted", role_id=agent_id,
                      objective_sha256=hashlib.sha256(objective.encode("utf-8")).hexdigest())
-        runner = WorkflowRunner(plan=bound_plan, execute=execute_stage, verify=verify_stage,
-                                 improve=improve_stage, deliver=deliver_stage, learn=learn_stage,
-                                 max_corrections=max_corrections, max_improvements=max_improvements)
-        return runner.run(request, workflow_id=workflow_id)
+        def hydrate_stage(stage_name: str, value: Any, replayed: bool):
+            nonlocal plan_context, improvement_round
+            if stage_name == "plan" and isinstance(value, dict):
+                plan_context = value
+            if replayed and stage_name == "execute":
+                improvement_round = 0
+            elif replayed and stage_name == "improve":
+                improvement_round += 1
+            task_id = value.get("task_id") if isinstance(value, dict) else None
+            if task_id and task_id not in stage_task_ids:
+                stage_task_ids.append(task_id)
+            if stage_name in {"execute", "improve"} and task_id and task_id not in worker_task_ids:
+                worker_task_ids.append(task_id)
+            if stage_name in {"plan", "execute", "improve", "deliver"}:
+                if stage_name not in completed_stages:
+                    completed_stages.append(stage_name)
+            elif stage_name == "verify" and isinstance(value, dict) and value.get("passed") is True:
+                if "verify" not in completed_stages:
+                    completed_stages.append("verify")
+
+        runner = WorkflowRunner(
+            plan=bound_plan, execute=execute_stage, verify=verify_stage,
+            improve=improve_stage, deliver=deliver_stage, learn=learn_stage,
+            max_corrections=max_corrections, max_improvements=max_improvements,
+            checkpoint_store=self.store, on_stage_result=hydrate_stage,
+        )
+        checkpoint_identity = {
+            "request": request,
+            "provider_route": effective_provider_route,
+            "max_corrections": max_corrections,
+            "max_improvements": max_improvements,
+            "deadline_seconds": float(deadline_seconds),
+        }
+        return runner.run(
+            request, workflow_id=workflow_id, checkpoint_identity=checkpoint_identity
+        )
 
     def add_shared_knowledge(self,source:str,content:str): return self.store.add_knowledge(source,content)
     def approve_shared_knowledge(self,knowledge_id:str,approval:ApprovalContext|None=None):

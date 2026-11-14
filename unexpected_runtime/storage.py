@@ -29,6 +29,29 @@ class StateStore:
             CREATE TABLE IF NOT EXISTS shared_knowledge(knowledge_id TEXT PRIMARY KEY, source TEXT NOT NULL, content TEXT NOT NULL, trust_status TEXT NOT NULL, reviewed_by TEXT, created_at REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS idempotency(idempotency_key TEXT PRIMARY KEY, request_hash TEXT NOT NULL, result_json TEXT NOT NULL, created_at REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS idempotency_claims(idempotency_key TEXT PRIMARY KEY, request_hash TEXT NOT NULL, task_id TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('running','completed','failed')), result_json TEXT, created_at REAL NOT NULL, updated_at REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS workflow_checkpoints(
+                workflow_id TEXT PRIMARY KEY,
+                request_hash TEXT NOT NULL CHECK(length(request_hash)=64),
+                checkpoint_version INTEGER NOT NULL CHECK(checkpoint_version>0),
+                revision INTEGER NOT NULL DEFAULT 0 CHECK(revision>=0),
+                status TEXT NOT NULL CHECK(status IN ('running','completed','interrupted','blocked')),
+                current_stage TEXT,state_json TEXT NOT NULL,
+                created_at REAL NOT NULL,updated_at REAL NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_workflow_checkpoints_status_updated
+                ON workflow_checkpoints(status,updated_at);
+            CREATE TABLE IF NOT EXISTS workflow_stage_checkpoints(
+                workflow_id TEXT NOT NULL REFERENCES workflow_checkpoints(workflow_id) ON DELETE RESTRICT,
+                stage_key TEXT NOT NULL,stage_index INTEGER NOT NULL CHECK(stage_index>0),
+                request_hash TEXT NOT NULL CHECK(length(request_hash)=64),
+                status TEXT NOT NULL CHECK(status IN ('started','completed','interrupted','failed')),
+                attempt_token TEXT NOT NULL,task_id TEXT,result_json TEXT,
+                created_at REAL NOT NULL,updated_at REAL NOT NULL,
+                PRIMARY KEY(workflow_id,stage_key),UNIQUE(workflow_id,stage_index)
+            );
+            CREATE INDEX IF NOT EXISTS idx_workflow_stage_checkpoints_status_updated
+                ON workflow_stage_checkpoints(status,updated_at);
+
             CREATE INDEX IF NOT EXISTS idx_idempotency_claims_state_updated ON idempotency_claims(state,updated_at);
             CREATE TABLE IF NOT EXISTS outcomes(outcome_id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, task_id TEXT, success INTEGER NOT NULL, feedback TEXT NOT NULL, provenance_json TEXT NOT NULL, created_at REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS proposals(proposal_id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, base_version TEXT NOT NULL, candidate_version TEXT NOT NULL, candidate_instruction TEXT NOT NULL, changes TEXT NOT NULL, protected_change INTEGER NOT NULL, benchmark_id TEXT NOT NULL, status TEXT NOT NULL, evaluation_json TEXT, created_at REAL NOT NULL, protected_fields_json TEXT NOT NULL DEFAULT '[]', evaluation_context_json TEXT NOT NULL DEFAULT '{}');
@@ -127,6 +150,153 @@ class StateStore:
             if not row: c.commit(); return None
             c.execute("UPDATE tasks SET status='running',updated_at=? WHERE task_id=? AND status='queued'",(time.time(),row['task_id']))
             c.commit(); return dict(row)
+
+    @staticmethod
+    def _validate_workflow_hash(value: str, field: str) -> None:
+        if (not isinstance(value, str) or len(value) != 64
+                or any(char not in "0123456789abcdef" for char in value)):
+            raise ValueError(f"{field} must be a 64-character lowercase SHA-256 hex string.")
+
+    @staticmethod
+    def _decode_workflow_checkpoint(row):
+        item = dict(row)
+        item["state"] = json.loads(item.pop("state_json"))
+        return item
+
+    @staticmethod
+    def _decode_workflow_stage(row):
+        item = dict(row)
+        raw = item.pop("result_json")
+        item["result"] = json.loads(raw) if raw else None
+        return item
+
+    def create_workflow_checkpoint(self, workflow_id: str, request_hash: str,
+                                   checkpoint_version: int, state: dict[str, Any]):
+        if not isinstance(workflow_id, str) or not workflow_id.strip():
+            raise ValueError("workflow_id must be a non-empty string.")
+        self._validate_workflow_hash(request_hash, "request_hash")
+        if isinstance(checkpoint_version, bool) or not isinstance(checkpoint_version, int) or checkpoint_version < 1:
+            raise ValueError("checkpoint_version must be a positive integer.")
+        if not isinstance(state, dict):
+            raise TypeError("state must be a dictionary.")
+        state_json = json.dumps(state, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        now = time.time()
+        with self._session() as c:
+            c.execute(
+                "INSERT OR IGNORE INTO workflow_checkpoints"
+                "(workflow_id,request_hash,checkpoint_version,revision,status,current_stage,state_json,created_at,updated_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?)",
+                (workflow_id, request_hash, checkpoint_version, 0, "running", None, state_json, now, now),
+            )
+            row = c.execute(
+                "SELECT * FROM workflow_checkpoints WHERE workflow_id=?", (workflow_id,)
+            ).fetchone()
+        if not row:
+            raise RuntimeError("Workflow checkpoint could not be read after creation.")
+        if row["request_hash"] != request_hash or int(row["checkpoint_version"]) != checkpoint_version:
+            raise ValueError("Workflow ID already belongs to a different request or checkpoint version.")
+        return self._decode_workflow_checkpoint(row)
+
+    def get_workflow_checkpoint(self, workflow_id: str):
+        if not isinstance(workflow_id, str) or not workflow_id.strip():
+            raise ValueError("workflow_id must be a non-empty string.")
+        with self._session() as c:
+            row = c.execute(
+                "SELECT * FROM workflow_checkpoints WHERE workflow_id=?", (workflow_id,)
+            ).fetchone()
+        return self._decode_workflow_checkpoint(row) if row else None
+
+    def save_workflow_checkpoint(self, workflow_id: str, expected_revision: int,
+                                 status: str, current_stage: str | None,
+                                 state: dict[str, Any]) -> bool:
+        allowed = {"running", "completed", "interrupted", "blocked"}
+        if status not in allowed:
+            raise ValueError("Unsupported workflow checkpoint status.")
+        if isinstance(expected_revision, bool) or not isinstance(expected_revision, int) or expected_revision < 0:
+            raise ValueError("expected_revision must be a non-negative integer.")
+        if current_stage is not None and (not isinstance(current_stage, str) or not current_stage.strip()):
+            raise ValueError("current_stage must be a non-empty string or None.")
+        if not isinstance(state, dict):
+            raise TypeError("state must be a dictionary.")
+        state_json = json.dumps(state, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        with self._session() as c:
+            cursor = c.execute(
+                "UPDATE workflow_checkpoints SET status=?,current_stage=?,state_json=?,"
+                "revision=revision+1,updated_at=? WHERE workflow_id=? AND revision=? AND status='running'",
+                (status, current_stage, state_json, time.time(), workflow_id, expected_revision),
+            )
+        return cursor.rowcount == 1
+
+    def begin_workflow_stage(self, workflow_id: str, stage_key: str, stage_index: int,
+                             request_hash: str, attempt_token: str):
+        if not isinstance(workflow_id, str) or not workflow_id.strip():
+            raise ValueError("workflow_id must be a non-empty string.")
+        if not isinstance(stage_key, str) or not stage_key.strip():
+            raise ValueError("stage_key must be a non-empty string.")
+        if isinstance(stage_index, bool) or not isinstance(stage_index, int) or stage_index < 1:
+            raise ValueError("stage_index must be a positive integer.")
+        self._validate_workflow_hash(request_hash, "request_hash")
+        if not isinstance(attempt_token, str) or not attempt_token.strip():
+            raise ValueError("attempt_token must be a non-empty string.")
+        now = time.time()
+        with self._session() as c:
+            parent = c.execute(
+                "SELECT status FROM workflow_checkpoints WHERE workflow_id=?", (workflow_id,)
+            ).fetchone()
+            if not parent:
+                raise KeyError("Workflow checkpoint does not exist.")
+            if parent["status"] != "running":
+                raise ValueError("Only a running workflow can start a stage.")
+            index_owner = c.execute(
+                "SELECT stage_key FROM workflow_stage_checkpoints WHERE workflow_id=? AND stage_index=?",
+                (workflow_id, stage_index),
+            ).fetchone()
+            if index_owner and index_owner["stage_key"] != stage_key:
+                raise ValueError("Workflow stage index is already assigned to another stage key.")
+            cursor = c.execute(
+                "INSERT OR IGNORE INTO workflow_stage_checkpoints"
+                "(workflow_id,stage_key,stage_index,request_hash,status,attempt_token,task_id,result_json,created_at,updated_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?)",
+                (workflow_id, stage_key, stage_index, request_hash, "started", attempt_token, None, None, now, now),
+            )
+            row = c.execute(
+                "SELECT * FROM workflow_stage_checkpoints WHERE workflow_id=? AND stage_key=?",
+                (workflow_id, stage_key),
+            ).fetchone()
+        if not row:
+            raise RuntimeError("Workflow stage checkpoint could not be read after acquisition.")
+        if row["request_hash"] != request_hash or int(row["stage_index"]) != stage_index:
+            raise ValueError("Workflow stage key already belongs to a different request or index.")
+        result = self._decode_workflow_stage(row)
+        result["can_execute"] = cursor.rowcount == 1
+        return result
+
+    def complete_workflow_stage(self, workflow_id: str, stage_key: str,
+                                attempt_token: str, task_id: str | None,
+                                result: dict[str, Any]) -> bool:
+        if not isinstance(result, dict):
+            raise TypeError("result must be a dictionary.")
+        if not isinstance(attempt_token, str) or not attempt_token.strip():
+            raise ValueError("attempt_token must be a non-empty string.")
+        result_json = json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        with self._session() as c:
+            cursor = c.execute(
+                "UPDATE workflow_stage_checkpoints SET status='completed',task_id=?,result_json=?,updated_at=? "
+                "WHERE workflow_id=? AND stage_key=? AND status='started' AND attempt_token=?",
+                (task_id, result_json, time.time(), workflow_id, stage_key, attempt_token),
+            )
+        return cursor.rowcount == 1
+
+    def list_workflow_stages(self, workflow_id: str):
+        if not isinstance(workflow_id, str) or not workflow_id.strip():
+            raise ValueError("workflow_id must be a non-empty string.")
+        with self._session() as c:
+            rows = c.execute(
+                "SELECT * FROM workflow_stage_checkpoints WHERE workflow_id=? ORDER BY stage_index",
+                (workflow_id,),
+            ).fetchall()
+        return [self._decode_workflow_stage(row) for row in rows]
+
     def set_memory(self,agent_id:str,key:str,value:Any):
         with self._session() as c: c.execute('INSERT INTO agent_memory(agent_id,key,value_json,updated_at) VALUES(?,?,?,?) ON CONFLICT(agent_id,key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at',(agent_id,key,json.dumps(value,ensure_ascii=False),time.time()))
     def get_memory(self,agent_id:str,key:str,default=None):
@@ -155,6 +325,22 @@ class StateStore:
                 if check['task_id']==task_id: return {'state':'claimed','task_id':task_id}
                 return {'state':'running','task_id':check['task_id']}
             return {'state':row['state'],'task_id':row['task_id'],'result':json.loads(row['result_json']) if row['result_json'] else None}
+
+    def get_idempotency_claim(self, key: str):
+        if not isinstance(key, str) or not key.strip():
+            raise ValueError("idempotency key must be a non-empty string.")
+        with self._session() as c:
+            row = c.execute(
+                "SELECT idempotency_key,request_hash,task_id,state,result_json,created_at,updated_at "
+                "FROM idempotency_claims WHERE idempotency_key=?",
+                (key,),
+            ).fetchone()
+        if not row:
+            return None
+        item = dict(row)
+        raw = item.pop("result_json")
+        item["result"] = json.loads(raw) if raw else None
+        return item
 
     def complete_idempotency(self,key:str,task_id:str,result:dict[str,Any])->bool:
         with self._session() as c:

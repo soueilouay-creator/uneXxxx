@@ -593,7 +593,7 @@ def create_server(*, coordinator=None, api_token=None, host="127.0.0.1", port=0)
                     return self.send_json(response_status,response_body)
                 except OSError:
                     return
-            allowed=({"agent_id","objective","inputs","deadline_seconds","max_corrections","max_improvements","provider_route"}
+            allowed=({"agent_id","objective","inputs","deadline_seconds","max_corrections","max_improvements","provider_route","workflow_id"}
                      if is_lifecycle else
                      {"agent_id","objective","inputs","deadline_seconds","max_steps","idempotency_key","source_refs","provider_route","skill_ids"})
             if set(body)-allowed: return self.send_json(400,{"error":"Unsupported fields; privileged actions are not exposed."})
@@ -609,6 +609,7 @@ def create_server(*, coordinator=None, api_token=None, host="127.0.0.1", port=0)
             skill_ids=body.get("skill_ids",[])
             corrections=body.get("max_corrections",1)
             improvements=body.get("max_improvements",3)
+            workflow_id=body.get("workflow_id")
             if not isinstance(agent,str) or not agent.strip() or not isinstance(objective,str) or not objective.strip():
                 return self.send_json(400,{"error":"agent_id and objective are required."})
             if len(objective)>MAX_OBJECTIVE_CHARS: return self.send_json(413,{"error":"Objective too large."})
@@ -622,6 +623,11 @@ def create_server(*, coordinator=None, api_token=None, host="127.0.0.1", port=0)
             if is_lifecycle and float(deadline) > 120:
                 return self.send_json(400,{"error":"Lifecycle per-stage deadline must not exceed 120 seconds."})
             if is_lifecycle:
+                if workflow_id is not None and (
+                    not isinstance(workflow_id, str) or not workflow_id.strip()
+                    or len(workflow_id) > 128 or any(ord(char) < 32 for char in workflow_id)
+                ):
+                    return self.send_json(400,{"error":"workflow_id must be a non-empty string of at most 128 safe characters."})
                 if not 0 <= corrections <= 2:
                     return self.send_json(400,{"error":"max_corrections must be between 0 and 2 for the HTTP workflow endpoint."})
                 if not 1 <= improvements <= 5:
@@ -664,7 +670,8 @@ def create_server(*, coordinator=None, api_token=None, host="127.0.0.1", port=0)
                                                     deadline_seconds=float(deadline),
                                                     max_corrections=corrections,
                                                     max_improvements=improvements,
-                                                    provider_route=provider_route).to_dict()
+                                                    provider_route=provider_route,
+                                                    workflow_id=workflow_id).to_dict()
                     finally:
                         lifecycle_slots.release()
                     success=result.get("status")=="delivered" and result.get("delivered") is True

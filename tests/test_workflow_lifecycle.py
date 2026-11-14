@@ -186,6 +186,120 @@ class WorkflowRunnerTests(unittest.TestCase):
         self.assertEqual(events[0]["improvements"], 2)
 
 
+class CheckpointedWorkflowRunnerTests(unittest.TestCase):
+    def test_completed_stage_is_replayed_and_remaining_stages_continue(self):
+        from unexpected_runtime.storage import StateStore
+
+        with tempfile.TemporaryDirectory() as directory:
+            store = StateStore(Path(directory) / "state.sqlite3")
+            from unexpected_runtime.models import TaskRequest
+            plan_task = TaskRequest.create(
+                "orchestrator", "Persisted plan task", task_id="plan-task"
+            )
+            store.enqueue(plan_task)
+            store.mark_task(
+                "plan-task", "completed",
+                {"task_id": "plan-task", "status": "completed"},
+            )
+            request = {"objective": "resume from a completed plan"}
+            identity = {"request": request, "provider_route": "fixture"}
+            workflow_id = "resume-completed-plan"
+            store.create_workflow_checkpoint(
+                workflow_id, WorkflowRunner._canonical_hash(identity), 1,
+                {"request": identity, "completed_stages": []},
+            )
+            stage_key = "0001:plan"
+            stage_hash = WorkflowRunner._stage_hash(stage_key, (request, None))
+            acquired = store.begin_workflow_stage(
+                workflow_id, stage_key, 1, stage_hash, "plan-attempt"
+            )
+            self.assertTrue(acquired["can_execute"])
+            persisted_plan = {"steps": ["persisted plan"]}
+            self.assertTrue(store.complete_workflow_stage(
+                workflow_id, stage_key, "plan-attempt", "plan-task",
+                {"value": persisted_plan},
+            ))
+            self.assertTrue(store.save_workflow_checkpoint(
+                workflow_id, 0, "running", stage_key,
+                {"request": identity, "completed_stages": [stage_key]},
+            ))
+
+            calls = []
+            runner = WorkflowRunner(
+                plan=lambda *args: self.fail("completed plan must be restored, not rerun"),
+                execute=lambda plan: calls.append("execute") or "draft",
+                verify=lambda candidate, plan: calls.append("verify") or {
+                    "passed": True, "feedback": ""
+                },
+                improve=lambda candidate, feedback: calls.append("improve") or candidate + "-improved",
+                deliver=lambda candidate: calls.append("deliver") or {"artifact": candidate},
+                learn=lambda record: calls.append("learn"),
+                checkpoint_store=store,
+            )
+            result = runner.run(request, workflow_id=workflow_id, checkpoint_identity=identity)
+            self.assertEqual(result.status, "delivered")
+            self.assertTrue(result.delivered)
+            self.assertEqual(result.plan, persisted_plan)
+            self.assertEqual(calls.count("execute"), 1)
+            self.assertEqual(calls.count("verify"), 2)
+            self.assertEqual(calls.count("improve"), 1)
+            self.assertEqual(calls.count("deliver"), 1)
+            self.assertEqual(calls.count("learn"), 1)
+            checkpoint = store.get_workflow_checkpoint(workflow_id)
+            self.assertEqual(checkpoint["status"], "completed")
+            self.assertEqual(checkpoint["state"]["result"]["status"], "delivered")
+
+            replay_calls = []
+            replay = WorkflowRunner(
+                plan=lambda *args: replay_calls.append("plan"),
+                execute=lambda *args: replay_calls.append("execute"),
+                verify=lambda *args: replay_calls.append("verify"),
+                improve=lambda *args: replay_calls.append("improve"),
+                deliver=lambda *args: replay_calls.append("deliver"),
+                learn=lambda *args: replay_calls.append("learn"),
+                checkpoint_store=store,
+            ).run(request, workflow_id=workflow_id, checkpoint_identity=identity)
+            self.assertEqual(replay.status, "delivered")
+            self.assertTrue(replay.delivered)
+            self.assertEqual(replay_calls, [])
+
+    def test_started_stage_is_never_reexecuted_and_blocks_following_stages(self):
+        from unexpected_runtime.storage import StateStore
+
+        with tempfile.TemporaryDirectory() as directory:
+            store = StateStore(Path(directory) / "state.sqlite3")
+            request = {"objective": "do not repeat an ambiguous stage"}
+            identity = {"request": request}
+            workflow_id = "ambiguous-stage"
+            store.create_workflow_checkpoint(
+                workflow_id, WorkflowRunner._canonical_hash(identity), 1,
+                {"request": identity, "completed_stages": []},
+            )
+            stage_key = "0001:plan"
+            store.begin_workflow_stage(
+                workflow_id, stage_key, 1,
+                WorkflowRunner._stage_hash(stage_key, (request, None)),
+                "abandoned-attempt",
+            )
+            calls = []
+            runner = WorkflowRunner(
+                plan=lambda *args: calls.append("plan"),
+                execute=lambda *args: calls.append("execute"),
+                verify=lambda *args: calls.append("verify"),
+                improve=lambda *args: calls.append("improve"),
+                deliver=lambda *args: calls.append("deliver"),
+                learn=lambda *args: calls.append("learn"),
+                checkpoint_store=store,
+            )
+            result = runner.run(request, workflow_id=workflow_id, checkpoint_identity=identity)
+            self.assertEqual(result.status, "blocked_execution")
+            self.assertFalse(result.delivered)
+            self.assertIn("already marked started", result.error)
+            self.assertEqual(calls, [])
+            self.assertEqual(store.list_workflow_stages(workflow_id)[0]["status"], "started")
+            self.assertEqual(store.get_workflow_checkpoint(workflow_id)["status"], "running")
+
+
 class CoordinatorLifecycleTests(unittest.TestCase):
     def _coordinator(self, reviewer_verdicts):
         import tempfile
@@ -281,6 +395,7 @@ class CoordinatorLifecycleTests(unittest.TestCase):
                 "max_corrections": 0,
                 "max_improvements": 2,
                 "deadline_seconds": 5,
+                "workflow_id": "http-lifecycle-checkpoint-fixture",
             }).encode("utf-8")
             request = urllib.request.Request(
                 url, data=body,
@@ -291,6 +406,20 @@ class CoordinatorLifecycleTests(unittest.TestCase):
                 payload = json.loads(response.read().decode("utf-8"))
                 self.assertEqual(response.status, 200)
                 self.assertEqual(payload["result"]["status"], "delivered")
+                self.assertEqual(payload["result"]["workflow_id"], "http-lifecycle-checkpoint-fixture")
+                checkpoint = coordinator.store.get_workflow_checkpoint("http-lifecycle-checkpoint-fixture")
+                self.assertEqual(checkpoint["status"], "completed")
+            replay_request = urllib.request.Request(
+                url, data=body,
+                headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(replay_request, timeout=10) as response:
+                replay_payload = json.loads(response.read().decode("utf-8"))
+                self.assertEqual(response.status, 200)
+                self.assertEqual(replay_payload["result"]["status"], "delivered")
+                self.assertEqual(replay_payload["result"]["workflow_id"], "http-lifecycle-checkpoint-fixture")
+                self.assertEqual(provider.review_calls, 2)
         finally:
             server.shutdown()
             server.server_close()
@@ -441,3 +570,109 @@ class CoordinatorLifecycleTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class WorkflowRestartPersistenceTests(unittest.TestCase):
+    def test_completed_stage_replays_after_store_instance_reopen(self):
+        from unexpected_runtime.storage import StateStore
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "state.sqlite3"
+            original_store = StateStore(path)
+            from unexpected_runtime.models import TaskRequest
+            plan_task = TaskRequest.create(
+                "orchestrator", "Persisted plan task", task_id="plan-task"
+            )
+            original_store.enqueue(plan_task)
+            original_store.mark_task(
+                "plan-task", "completed",
+                {"task_id": "plan-task", "status": "completed"},
+            )
+            request = {"objective": "resume a completed stage after reopening storage"}
+            identity = {"request": request, "provider_route": "fixture"}
+            workflow_id = "restart-completed-stage"
+            original_store.create_workflow_checkpoint(
+                workflow_id, WorkflowRunner._canonical_hash(identity), 1,
+                {"request": identity, "completed_stages": []},
+            )
+            stage_key = "0001:plan"
+            self.assertTrue(original_store.begin_workflow_stage(
+                workflow_id, stage_key, 1,
+                WorkflowRunner._stage_hash(stage_key, (request, None)),
+                "original-plan-attempt",
+            )["can_execute"])
+            persisted_plan = {"steps": ["persisted before restart"]}
+            self.assertTrue(original_store.complete_workflow_stage(
+                workflow_id, stage_key, "original-plan-attempt", "plan-task",
+                {"value": persisted_plan},
+            ))
+            self.assertTrue(original_store.save_workflow_checkpoint(
+                workflow_id, 0, "running", stage_key,
+                {"request": identity, "completed_stages": [stage_key]},
+            ))
+
+            # A fresh store object models a new runtime process opening the same file.
+            del original_store
+            reopened_store = StateStore(path)
+            calls = []
+            result = WorkflowRunner(
+                plan=lambda *args: self.fail("persisted plan must not execute twice"),
+                execute=lambda plan: calls.append("execute") or "draft",
+                verify=lambda candidate, plan: calls.append("verify") or {
+                    "passed": True, "feedback": ""
+                },
+                improve=lambda candidate, feedback: calls.append("improve") or candidate + "-improved",
+                deliver=lambda candidate: calls.append("deliver") or {"artifact": candidate},
+                learn=lambda record: calls.append("learn"),
+                checkpoint_store=reopened_store,
+            ).run(request, workflow_id=workflow_id, checkpoint_identity=identity)
+
+            self.assertEqual(result.status, "delivered")
+            self.assertTrue(result.delivered)
+            self.assertEqual(result.plan, persisted_plan)
+            self.assertEqual(calls.count("execute"), 1)
+            self.assertEqual(calls.count("verify"), 2)
+            self.assertEqual(calls.count("improve"), 1)
+            self.assertEqual(calls.count("deliver"), 1)
+            self.assertEqual(calls.count("learn"), 1)
+            self.assertEqual(reopened_store.get_workflow_checkpoint(workflow_id)["status"], "completed")
+
+    def test_ambiguous_started_stage_stays_blocked_after_store_instance_reopen(self):
+        from unexpected_runtime.storage import StateStore
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "state.sqlite3"
+            original_store = StateStore(path)
+            request = {"objective": "never replay an ambiguous stage after reopening storage"}
+            identity = {"request": request}
+            workflow_id = "restart-ambiguous-stage"
+            original_store.create_workflow_checkpoint(
+                workflow_id, WorkflowRunner._canonical_hash(identity), 1,
+                {"request": identity, "completed_stages": []},
+            )
+            stage_key = "0001:plan"
+            original_store.begin_workflow_stage(
+                workflow_id, stage_key, 1,
+                WorkflowRunner._stage_hash(stage_key, (request, None)),
+                "abandoned-before-restart",
+            )
+
+            # A fresh store object must observe the started row and refuse replay.
+            del original_store
+            reopened_store = StateStore(path)
+            calls = []
+            result = WorkflowRunner(
+                plan=lambda *args: calls.append("plan"),
+                execute=lambda *args: calls.append("execute"),
+                verify=lambda *args: calls.append("verify"),
+                improve=lambda *args: calls.append("improve"),
+                deliver=lambda *args: calls.append("deliver"),
+                learn=lambda *args: calls.append("learn"),
+                checkpoint_store=reopened_store,
+            ).run(request, workflow_id=workflow_id, checkpoint_identity=identity)
+
+            self.assertEqual(result.status, "blocked_execution")
+            self.assertFalse(result.delivered)
+            self.assertIn("already marked started", result.error)
+            self.assertEqual(calls, [])
+            self.assertEqual(reopened_store.list_workflow_stages(workflow_id)[0]["status"], "started")
+            self.assertEqual(reopened_store.get_workflow_checkpoint(workflow_id)["status"], "running")

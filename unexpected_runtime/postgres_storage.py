@@ -182,6 +182,154 @@ class PostgresStateStore(PostgresIdempotencyMixin):
             result["status"] = "running"
             return result
 
+
+    @staticmethod
+    def _validate_workflow_hash(value: str, field: str) -> None:
+        if (not isinstance(value, str) or len(value) != 64
+                or any(char not in "0123456789abcdef" for char in value)):
+            raise ValueError(f"{field} must be a 64-character lowercase SHA-256 hex string.")
+
+    @staticmethod
+    def _decode_workflow_checkpoint(row):
+        item = dict(row)
+        item["state"] = json.loads(item.pop("state_json"))
+        return item
+
+    @staticmethod
+    def _decode_workflow_stage(row):
+        item = dict(row)
+        raw = item.pop("result_json")
+        item["result"] = json.loads(raw) if raw else None
+        return item
+
+    def create_workflow_checkpoint(self, workflow_id: str, request_hash: str,
+                                   checkpoint_version: int, state: dict[str, Any]):
+        if not isinstance(workflow_id, str) or not workflow_id.strip():
+            raise ValueError("workflow_id must be a non-empty string.")
+        self._validate_workflow_hash(request_hash, "request_hash")
+        if isinstance(checkpoint_version, bool) or not isinstance(checkpoint_version, int) or checkpoint_version < 1:
+            raise ValueError("checkpoint_version must be a positive integer.")
+        if not isinstance(state, dict):
+            raise TypeError("state must be a dictionary.")
+        state_json = self._dump(state)
+        now = time.time()
+        with self._session() as connection:
+            connection.execute(
+                "INSERT INTO workflow_checkpoints"
+                "(workflow_id,request_hash,checkpoint_version,revision,status,current_stage,state_json,created_at,updated_at) "
+                "VALUES(%s,%s,%s,0,'running',NULL,%s,%s,%s) ON CONFLICT(workflow_id) DO NOTHING",
+                (workflow_id, request_hash, checkpoint_version, state_json, now, now),
+            )
+            row = connection.execute(
+                "SELECT * FROM workflow_checkpoints WHERE workflow_id=%s", (workflow_id,)
+            ).fetchone()
+        if not row:
+            raise RuntimeError("Workflow checkpoint could not be read after creation.")
+        if row["request_hash"] != request_hash or int(row["checkpoint_version"]) != checkpoint_version:
+            raise ValueError("Workflow ID already belongs to a different request or checkpoint version.")
+        return self._decode_workflow_checkpoint(row)
+
+    def get_workflow_checkpoint(self, workflow_id: str):
+        if not isinstance(workflow_id, str) or not workflow_id.strip():
+            raise ValueError("workflow_id must be a non-empty string.")
+        with self._session() as connection:
+            row = connection.execute(
+                "SELECT * FROM workflow_checkpoints WHERE workflow_id=%s", (workflow_id,)
+            ).fetchone()
+        return self._decode_workflow_checkpoint(row) if row else None
+
+    def save_workflow_checkpoint(self, workflow_id: str, expected_revision: int,
+                                 status: str, current_stage: str | None,
+                                 state: dict[str, Any]) -> bool:
+        if status not in {"running", "completed", "interrupted", "blocked"}:
+            raise ValueError("Unsupported workflow checkpoint status.")
+        if isinstance(expected_revision, bool) or not isinstance(expected_revision, int) or expected_revision < 0:
+            raise ValueError("expected_revision must be a non-negative integer.")
+        if current_stage is not None and (not isinstance(current_stage, str) or not current_stage.strip()):
+            raise ValueError("current_stage must be a non-empty string or None.")
+        if not isinstance(state, dict):
+            raise TypeError("state must be a dictionary.")
+        state_json = self._dump(state)
+        with self._session() as connection:
+            cursor = connection.execute(
+                "UPDATE workflow_checkpoints SET status=%s,current_stage=%s,state_json=%s,"
+                "revision=revision+1,updated_at=%s WHERE workflow_id=%s AND revision=%s AND status='running'",
+                (status, current_stage, state_json, time.time(), workflow_id, expected_revision),
+            )
+        return cursor.rowcount == 1
+
+    def begin_workflow_stage(self, workflow_id: str, stage_key: str, stage_index: int,
+                             request_hash: str, attempt_token: str):
+        if not isinstance(workflow_id, str) or not workflow_id.strip():
+            raise ValueError("workflow_id must be a non-empty string.")
+        if not isinstance(stage_key, str) or not stage_key.strip():
+            raise ValueError("stage_key must be a non-empty string.")
+        if isinstance(stage_index, bool) or not isinstance(stage_index, int) or stage_index < 1:
+            raise ValueError("stage_index must be a positive integer.")
+        self._validate_workflow_hash(request_hash, "request_hash")
+        if not isinstance(attempt_token, str) or not attempt_token.strip():
+            raise ValueError("attempt_token must be a non-empty string.")
+        now = time.time()
+        with self._session() as connection:
+            parent = connection.execute(
+                "SELECT status FROM workflow_checkpoints WHERE workflow_id=%s", (workflow_id,)
+            ).fetchone()
+            if not parent:
+                raise KeyError("Workflow checkpoint does not exist.")
+            if parent["status"] != "running":
+                raise ValueError("Only a running workflow can start a stage.")
+            index_owner = connection.execute(
+                "SELECT stage_key FROM workflow_stage_checkpoints WHERE workflow_id=%s AND stage_index=%s",
+                (workflow_id, stage_index),
+            ).fetchone()
+            if index_owner and index_owner["stage_key"] != stage_key:
+                raise ValueError("Workflow stage index is already assigned to another stage key.")
+            cursor = connection.execute(
+                "INSERT INTO workflow_stage_checkpoints"
+                "(workflow_id,stage_key,stage_index,request_hash,status,attempt_token,task_id,result_json,created_at,updated_at) "
+                "VALUES(%s,%s,%s,%s,'started',%s,NULL,NULL,%s,%s) "
+                "ON CONFLICT(workflow_id,stage_key) DO NOTHING RETURNING stage_key",
+                (workflow_id, stage_key, stage_index, request_hash, attempt_token, now, now),
+            )
+            inserted = cursor.fetchone() is not None
+            row = connection.execute(
+                "SELECT * FROM workflow_stage_checkpoints WHERE workflow_id=%s AND stage_key=%s",
+                (workflow_id, stage_key),
+            ).fetchone()
+        if not row:
+            raise RuntimeError("Workflow stage checkpoint could not be read after acquisition.")
+        if row["request_hash"] != request_hash or int(row["stage_index"]) != stage_index:
+            raise ValueError("Workflow stage key already belongs to a different request or index.")
+        result = self._decode_workflow_stage(row)
+        result["can_execute"] = inserted
+        return result
+
+    def complete_workflow_stage(self, workflow_id: str, stage_key: str,
+                                attempt_token: str, task_id: str | None,
+                                result: dict[str, Any]) -> bool:
+        if not isinstance(result, dict):
+            raise TypeError("result must be a dictionary.")
+        if not isinstance(attempt_token, str) or not attempt_token.strip():
+            raise ValueError("attempt_token must be a non-empty string.")
+        result_json = self._dump(result)
+        with self._session() as connection:
+            cursor = connection.execute(
+                "UPDATE workflow_stage_checkpoints SET status='completed',task_id=%s,result_json=%s,updated_at=%s "
+                "WHERE workflow_id=%s AND stage_key=%s AND status='started' AND attempt_token=%s",
+                (task_id, result_json, time.time(), workflow_id, stage_key, attempt_token),
+            )
+        return cursor.rowcount == 1
+
+    def list_workflow_stages(self, workflow_id: str):
+        if not isinstance(workflow_id, str) or not workflow_id.strip():
+            raise ValueError("workflow_id must be a non-empty string.")
+        with self._session() as connection:
+            rows = connection.execute(
+                "SELECT * FROM workflow_stage_checkpoints WHERE workflow_id=%s ORDER BY stage_index",
+                (workflow_id,),
+            ).fetchall()
+        return [self._decode_workflow_stage(row) for row in rows]
+
     def set_memory(self, agent_id: str, key: str, value: Any):
         with self._session() as connection:
             connection.execute(

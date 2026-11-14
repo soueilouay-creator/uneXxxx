@@ -91,3 +91,14 @@ This file is append-only. Each entry records one bounded engineering increment a
 - **Safety boundary:** this run is documentation-only. No runtime source, database schema, approval record, task, provider, Render/Neon resource, deployment, PWA or user data changed. Existing unbound approvals remain untouched and are not authorized for replay.
 - **Costs:** no new dependencies, provider calls, paid infrastructure, migrations or deployment. CI account-level billing is not exposed.
 - **Next:** implement Task 1 of the saved plan with TDD on the existing feature branch; do not wire bound approval consumption until durable execution intents exist.
+
+
+## Run 9 — 2026-11-14 — Execution-intent storage contract (TDD red)
+
+- **Phase:** Phase 3, durable execution; approval-binding Task 1.
+- **Baseline:** rechecked core `main` at `d04b651774b7699f3430dc36972c2de74c587839` and draft PR #16 at `39455b3cef468e9cd812b2b7cb8d2ce0f39bdbc6` (26 commits ahead, 0 behind; no removed paths).
+- **Test change:** added `tests/test_approval_execution_intents.py` first. It specifies SQLite and ephemeral-PostgreSQL parity for stable intent creation/read-back, idempotent duplicate create, conflicting identity rejection, unique task ownership, workflow/stage pair validation, SHA-256/permission validation, revision-checked legal transitions and concurrent single-winner transitions.
+- **TDD status:** red stage only. No production implementation or schema change has been made in this commit. The focused suite is expected to fail because the new storage methods/table do not exist yet; the CI result will record the actual failure.
+- **Preservation:** tests use a temporary SQLite database or the ephemeral PostgreSQL CI database. No existing task, approval, user data, production database, Neon branch, Render service, deployment, PWA, secret or provider was touched.
+- **Costs:** no new dependency, provider call, paid infrastructure, production migration or deployment. GitHub Actions account-level billing is not exposed.
+- **Next:** observe the focused CI failure for the missing methods, then implement the minimum additive SQLite/PostgreSQL intent contract and migration 005.

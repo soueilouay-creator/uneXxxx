@@ -57,3 +57,13 @@ This file is append-only. Each entry records one bounded engineering increment a
 - **Outstanding CI:** renderer E2E remained in progress at the immutable Opuscar worker build step when this entry was written. The MP4 render and image-identity steps were not yet verified.
 - **Correction recorded:** the first CI attempt \`43546874318\` stopped at the inventory parser because a temporary comment row was not a digest/path record. The row was removed; the second run passed the inventory check. No source test failure was hidden.
 - **Interpretation:** the workflow/task/idempotency recovery guard is runtime-test verified. This does not complete PostgreSQL process-crash recovery, durable approval linkage or the overall V8 release gate.
+
+
+### Run 6 final CI completion — 2026-11-14
+
+- **CI run:** [43547031183](https://github.com/soueilouay-creator/uneXxxx/actions/runs/43547031183) completed successfully on tested head \`5e3eaa91bd3aeaa56075b18b32cd92bda995f3fb\`.
+- **Runtime job:** \`Ran 388 tests in 94.196s\`; \`OK (skipped=3)\`. All eight new recovery/lookup regression tests passed, including the PostgreSQL ephemeral-database lookup.
+- **Renderer E2E:** \`Ran 2 tests in 27.731s\`; \`OK\`. Immutable renderer worker built, real vertical MP4 render passed with worker network disabled, and renderer image identity was confirmed.
+- **Other gates:** ephemeral PostgreSQL migrations, changed-file SHA-256 inventory, runtime compile, JavaScript/YAML/Bash checks, Docker image build, actual container smoke test and CLI smoke tests all passed.
+- **Commit lineage:** implementation commit \`ea19bcb7b5830c4e62d95cd84d1ba0dde74b0f8d\`; CI-tested source/manifest head \`5e3eaa91bd3aeaa56075b18b32cd92bda995f3fb\`. Subsequent commits only append verification evidence and refresh the SHA-256 inventory; runtime source and tests were unchanged.
+- **PR #16 remains draft and unmerged.** No production deployment, production database migration, user-data migration or external provider call was performed.

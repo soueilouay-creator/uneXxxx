@@ -79,3 +79,15 @@ This file is append-only. Each entry records one bounded engineering increment a
 - **Preservation:** test uses only a newly created temporary SQLite database. No existing task, event, memory, approval, Creator Studio record, user data, Neon branch, Render service, deployment, PWA, source archive, setting or secret was read or changed.
 - **Costs:** no new package, infrastructure, provider call, generation credit, paid service or database migration. GitHub Actions account-level billing is not visible.
 - **Next:** add a durable, action-digest-bound approval reference through the workflow-stage and task creation path without changing the current one-use verifier semantics; then test concurrent PostgreSQL recovery with separate connections and processes. Do not release automatic replay of ambiguous stages until these checks pass.
+
+
+## Run 8 — 2026-11-14 — Approval execution-binding design
+
+- **Phase:** Phase 3, durable execution and privileged-action recovery design.
+- **Baseline:** verified core `main` at `d04b651774b7699f3430dc36972c2de74c587839` and draft PR #16 at `0ce8b5f198e1028c8c863ef87b05c30029db3abd` on `upgrade/v8-workflow-checkpoint-ledger-20261111` (25 commits ahead, 0 behind; no removed paths).
+- **Verification closed:** CI run [43578227455](https://github.com/soueilouay-creator/uneXxxx/actions/runs/43578227455) completed successfully. Runtime/security suite: **389 tests, 3 skipped, 0 failures**. The new `test_abrupt_process_exit_leaves_started_stage_blocked_after_reopen` passed. Renderer E2E: **2 tests, 0 failures**. Ephemeral PostgreSQL migrations, changed-file SHA-256 inventory, Docker build/container smoke, CLI smoke and isolated renderer image/render checks passed.
+- **Finding:** current `Coordinator.invoke` authorizes before creating `TaskRequest`, so the approval verifier cannot bind consumption to the future task. The existing one-use ledger persists only approval ID/action digest/consumption time. The HTTP invocation API rejects approval fields. `WorkflowRunner` marks a stage `started` before invoking its callback, so a new human-approval pause cannot reuse that status without risking ambiguous-execution replay.
+- **Design:** added `docs/plans/2026-11-14-approval-execution-binding.md` with a repository-grounded, five-task implementation plan: durable execution intents; a separate additive approval-binding table and atomic one-use consumption; prepared-task authorization/enqueue API; explicit non-ambiguous workflow approval pause/resume; and separate-connection/process PostgreSQL verification.
+- **Safety boundary:** this run is documentation-only. No runtime source, database schema, approval record, task, provider, Render/Neon resource, deployment, PWA or user data changed. Existing unbound approvals remain untouched and are not authorized for replay.
+- **Costs:** no new dependencies, provider calls, paid infrastructure, migrations or deployment. CI account-level billing is not exposed.
+- **Next:** implement Task 1 of the saved plan with TDD on the existing feature branch; do not wire bound approval consumption until durable execution intents exist.

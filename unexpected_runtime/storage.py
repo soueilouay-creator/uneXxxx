@@ -326,6 +326,22 @@ class StateStore:
                 return {'state':'running','task_id':check['task_id']}
             return {'state':row['state'],'task_id':row['task_id'],'result':json.loads(row['result_json']) if row['result_json'] else None}
 
+    def get_idempotency_claim(self, key: str):
+        if not isinstance(key, str) or not key.strip():
+            raise ValueError("idempotency key must be a non-empty string.")
+        with self._session() as c:
+            row = c.execute(
+                "SELECT idempotency_key,request_hash,task_id,state,result_json,created_at,updated_at "
+                "FROM idempotency_claims WHERE idempotency_key=?",
+                (key,),
+            ).fetchone()
+        if not row:
+            return None
+        item = dict(row)
+        raw = item.pop("result_json")
+        item["result"] = json.loads(raw) if raw else None
+        return item
+
     def complete_idempotency(self,key:str,task_id:str,result:dict[str,Any])->bool:
         with self._session() as c:
             cur=c.execute("UPDATE idempotency_claims SET state='completed',result_json=?,updated_at=? WHERE idempotency_key=? AND task_id=? AND state='running'",(json.dumps(result,ensure_ascii=False),time.time(),key,task_id))

@@ -212,3 +212,4 @@ d31531805581712e1f4c88d4a2fc5faa751bc476358f51f4a0df6eebec727118  web/assets/wor
 adf75585548cc4c1649228a84867c680e9c342965bf954b0533184f66059c49c  web/index.html
 0a06c5636a47c3d1e8a33976e997a83b61655c95643b4bf0ca7689a42d0a7218  workflow_profiles/creative-media-studio.md
 54cb7dba8e9c6a2aa7310460e20cbdd54474a557bd2ed676c09d571841f58d8b  workflow_profiles/skill-engineering.md
+# Run 6 verification trigger: task/idempotency/approval recovery checks added on PR #16.

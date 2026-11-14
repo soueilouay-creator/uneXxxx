@@ -47,3 +47,13 @@ This file is append-only. Each entry records one bounded engineering increment a
 - **Verification:** new CI is triggered by this commit; test count and result will be appended after the run completes.
 - **Costs:** no new package, service, provider call, generation credit, paid infrastructure or database migration. GitHub Actions account-level billing is not visible.
 - **Next:** add an OS-process termination test and design a durable, action-digest-bound approval reference that can be reconciled without weakening the one-use approval ledger.
+
+
+### Run 6 verification update — 2026-11-14
+
+- **Implementation commit:** \`ea19bcb7b5830c4e62d95cd84d1ba0dde74b0f8d\`; verified CI head \`5e3eaa91bd3aeaa56075b18b32cd92bda995f3fb\`.
+- **CI run:** [43547031183](https://github.com/soueilouay-creator/uneXxxx/actions/runs/43547031183). Runtime job completed successfully: \`Ran 388 tests in 94.196s\`; \`OK (skipped=3)\`. The new SQLite reconciliation cases and PostgreSQL idempotency-lookup test all passed.
+- **Additional checks:** ephemeral PostgreSQL migrations passed; source integrity fixture and SHA-256 inventory passed; single-process Docker image build, actual container smoke test and CLI smoke tests passed.
+- **Outstanding CI:** renderer E2E remained in progress at the immutable Opuscar worker build step when this entry was written. The MP4 render and image-identity steps were not yet verified.
+- **Correction recorded:** the first CI attempt \`43546874318\` stopped at the inventory parser because a temporary comment row was not a digest/path record. The row was removed; the second run passed the inventory check. No source test failure was hidden.
+- **Interpretation:** the workflow/task/idempotency recovery guard is runtime-test verified. This does not complete PostgreSQL process-crash recovery, durable approval linkage or the overall V8 release gate.

@@ -192,6 +192,15 @@ class CheckpointedWorkflowRunnerTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             store = StateStore(Path(directory) / "state.sqlite3")
+            from unexpected_runtime.models import TaskRequest
+            plan_task = TaskRequest.create(
+                "orchestrator", "Persisted plan task", task_id="plan-task"
+            )
+            store.enqueue(plan_task)
+            store.mark_task(
+                "plan-task", "completed",
+                {"task_id": "plan-task", "status": "completed"},
+            )
             request = {"objective": "resume from a completed plan"}
             identity = {"request": request, "provider_route": "fixture"}
             workflow_id = "resume-completed-plan"
@@ -569,6 +578,15 @@ class WorkflowRestartPersistenceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "state.sqlite3"
             original_store = StateStore(path)
+            from unexpected_runtime.models import TaskRequest
+            plan_task = TaskRequest.create(
+                "orchestrator", "Persisted plan task", task_id="plan-task"
+            )
+            original_store.enqueue(plan_task)
+            original_store.mark_task(
+                "plan-task", "completed",
+                {"task_id": "plan-task", "status": "completed"},
+            )
             request = {"objective": "resume a completed stage after reopening storage"}
             identity = {"request": request, "provider_route": "fixture"}
             workflow_id = "restart-completed-stage"

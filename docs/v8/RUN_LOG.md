@@ -158,3 +158,26 @@ This file is append-only. Each entry records one bounded engineering increment a
 - **Verification:** new CI pending. Prior failed CI evidence and the exact errors remain recorded above; no green claim until the full suite passes on the new head.
 - **Next:** review the rerun's focused intent contract and full regression suite; run process/connection concurrency evidence, then move to Task 2 approval binding only after Task 1 is green.
 - **Costs/preservation:** no dependencies, paid tests, API credits, paid infrastructure, deployment or production writes. Existing tasks/events/memories and all non-target files remain preserved; GitHub Actions account-level billing is not visible.
+
+
+### Run 12 final CI verification — 2026-11-15
+
+- **Tested commit:** `5941a06845088ac246aa7801f8a88f01e89fe3eb`.
+- **CI run:** [43696872369](https://github.com/soueilouay-creator/uneXxxx/actions/runs/43696872369) completed successfully; both `runtime-tests` and `renderer-e2e` are green.
+- **Runtime/security:** `Ran 410 tests in 75.725s`; `OK (skipped=3)`.
+- **Renderer E2E:** `Ran 2 tests in 28.457s`; `OK`. The immutable renderer worker built, a real vertical MP4 rendered with worker network disabled, and image identity was confirmed.
+- **PostgreSQL migration preservation:** migrations 001–005 applied to the ephemeral PostgreSQL 16 service. Synthetic task, event and memory records inserted before migration 005 were read back unchanged after it.
+- **Additional gates:** runtime compile, JavaScript syntax, YAML/Bash validation, resource catalog validation, changed-file SHA-256 inventory, runtime Docker image build, live container smoke test and CLI smoke tests all passed.
+- **Task 1 status:** completed and verified on this commit. The approval execution intent remains a storage-only object; no approval consumption or privileged task invocation is wired to it yet.
+- **Preservation:** PR #16 remains open and draft, 31 commits ahead and 0 behind main; compare shows no removed paths. No production migration, Neon/Render change, deployment, provider call, or user-data mutation occurred.
+
+## Run 13 — 2026-11-15 — Bound approval ledger contract (TDD red)
+
+- **Phase:** Phase 3, durable execution; approval-binding Task 2.
+- **Baseline and rollback:** Task 1 verified at `5941a06845088ac246aa7801f8a88f01e89fe3eb`; default branch `main` remains `d04b651774b7699f3430dc36972c2de74c587839`. Work remains on the existing `upgrade/v8-workflow-checkpoint-ledger-20261111` branch and draft PR #16.
+- **Test-first changes:** added immutable `ApprovalExecutionBinding` model and focused failing tests for SQLite verifier binding, exact execution/task/workflow/stage/digest identity, concurrent one-use consumption, ledger outage fail-closed behavior, retained legacy unbound rows, PostgreSQL transactional rollback on binding failure, uniqueness and multi-connection concurrency.
+- **TDD red expectation:** ledger `consume_once_bound`, read-back, and verifier `verify_bound` do not yet exist. No approval binding table or implementation is included in this test-first increment.
+- **Safety boundary:** legacy `verify` and `consume_once` behavior remains unchanged. No current task is newly authorized by an execution intent. Approval PRs, production data and user records are not touched.
+- **Verification:** focused tests and resulting red CI are pending; the previous full CI green on Task 1 is historical evidence, not a pass for the new tests.
+- **Next:** confirm the new contract fails only for absent bound methods, then add migration 006 and same-transaction SQLite/PostgreSQL bound consumption plus lookup; no coordinator/HTTP wiring until Task 3.
+- **Costs/preservation:** no new dependencies, provider/API calls, paid infrastructure, deployment or production migration. GitHub Actions account-level billing is not visible.

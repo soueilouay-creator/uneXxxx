@@ -70,6 +70,36 @@ class TaskResult:
                    idempotent_replay=d.get('idempotent_replay',False),started_at=d.get('started_at'),finished_at=d.get('finished_at'))
 
 @dataclass(frozen=True)
+class ApprovalExecutionBinding:
+    """Immutable identity to which a one-use privileged approval is consumed."""
+
+    execution_id: str
+    task_id: str
+    workflow_id: str | None = None
+    stage_key: str | None = None
+
+    def __post_init__(self) -> None:
+        for field_name in ("execution_id", "task_id"):
+            value = getattr(self, field_name)
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"{field_name} must be a non-empty string.")
+        if (self.workflow_id is None) != (self.stage_key is None):
+            raise ValueError("workflow_id and stage_key must be supplied together.")
+        for field_name in ("workflow_id", "stage_key"):
+            value = getattr(self, field_name)
+            if value is not None and (not isinstance(value, str) or not value.strip()):
+                raise ValueError(f"{field_name} must be a non-empty string when supplied.")
+
+    def to_dict(self) -> dict[str, str | None]:
+        return {
+            "execution_id": self.execution_id,
+            "task_id": self.task_id,
+            "workflow_id": self.workflow_id,
+            "stage_key": self.stage_key,
+        }
+
+
+@dataclass(frozen=True)
 class ApprovalContext:
     approval_id: str
     approver: str

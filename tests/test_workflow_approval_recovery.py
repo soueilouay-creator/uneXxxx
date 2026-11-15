@@ -27,13 +27,18 @@ class WorkflowApprovalPauseResumeTests(unittest.TestCase):
 
         def prepare(wf_id, stage_key, stage_hash, args, permission):
             self.preparations.append((wf_id, stage_key, stage_hash, permission))
+            execution_id = "execution:" + wf_id + ":" + stage_key
+            task_id = "task:" + wf_id + ":" + stage_key
+            action_digest = "a" * 64
+            self.store.create_approval_execution_intent(
+                execution_id, task_id, "b" * 64, action_digest, permission, wf_id, stage_key
+            )
+            self.store.transition_approval_execution_intent(execution_id, "prepared", "awaiting_approval", 0)
             return {
-                "execution_id": "execution:" + wf_id + ":" + stage_key,
-                "task_id": "task:" + wf_id + ":" + stage_key,
-                "action_digest": "a" * 64, "permission": permission,
+                "execution_id": execution_id, "task_id": task_id,
+                "action_digest": action_digest, "permission": permission,
                 "action_details": {"execution_binding": {
-                    "execution_id": "execution:" + wf_id + ":" + stage_key,
-                    "task_id": "task:" + wf_id + ":" + stage_key,
+                    "execution_id": execution_id, "task_id": task_id,
                     "workflow_id": wf_id, "stage_key": stage_key,
                 }},
             }

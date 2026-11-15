@@ -24,6 +24,7 @@ class WorkflowResult:
     error: str | None = None
     learning_error: str | None = None
     workflow_id: str | None = None
+    pending_approval: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -32,7 +33,16 @@ class WorkflowResult:
             'delivery': self.delivery, 'corrections': self.corrections,
             'improvements': self.improvements, 'verification_history': list(self.verification_history), 'error': self.error,
             'learning_error': self.learning_error, 'workflow_id': self.workflow_id,
+            'pending_approval': self.pending_approval,
         }
+
+
+class WorkflowAwaitingApproval(RuntimeError):
+    """A protected workflow stage is durably prepared but awaits human approval."""
+
+    def __init__(self, pending: dict[str, Any]):
+        super().__init__("Workflow stage is waiting for an execution-bound approval.")
+        self.pending = dict(pending)
 
 
 class WorkflowCheckpointBlocked(RuntimeError):
@@ -47,7 +57,12 @@ class WorkflowRunner:
                  improve: Callable[[Any, str], Any], deliver: Callable[[Any], Any],
                  learn: Callable[[dict[str, Any]], Any], max_corrections: int = 1,
                  max_improvements: int = 3, checkpoint_store: Any | None = None,
-                 on_stage_result: Callable[[str, Any, bool], None] | None = None) -> None:
+                 on_stage_result: Callable[[str, Any, bool], None] | None = None,
+                 stage_approval_permissions: dict[str, str] | None = None,
+                 stage_approvals: dict[str, Any] | None = None,
+                 prepare_stage_approval: Callable[..., dict[str, Any]] | None = None,
+                 execute_stage_approval: Callable[..., Any] | None = None,
+                 complete_stage_approval: Callable[..., bool] | None = None) -> None:
         if isinstance(max_corrections, bool) or not isinstance(max_corrections, int) or not 0 <= max_corrections <= 5:
             raise ValueError('max_corrections must be an integer between 0 and 5.')
         if isinstance(max_improvements, bool) or not isinstance(max_improvements, int) or not 1 <= max_improvements <= 5:
@@ -58,6 +73,22 @@ class WorkflowRunner:
         self.max_improvements = max_improvements
         self.checkpoint_store = checkpoint_store
         self.on_stage_result = on_stage_result
+        permissions = dict(stage_approval_permissions or {})
+        if any(stage not in {"plan", "execute", "verify", "improve"} for stage in permissions):
+            raise ValueError("Only plan, execute, verify and improve stages can require approval.")
+        if any(not isinstance(scope, str) or scope not in PRIVILEGED for scope in permissions.values()):
+            raise ValueError("Workflow stage approvals must use a privileged permission scope.")
+        if permissions and checkpoint_store is None:
+            raise ValueError("Execution-bound stage approvals require durable workflow checkpoints.")
+        if permissions and not all(callable(callback) for callback in (
+            prepare_stage_approval, execute_stage_approval, complete_stage_approval
+        )):
+            raise ValueError("Execution-bound stage approvals require prepare, execute and complete callbacks.")
+        self.stage_approval_permissions = permissions
+        self.stage_approvals = dict(stage_approvals or {})
+        self.prepare_stage_approval = prepare_stage_approval
+        self.execute_stage_approval = execute_stage_approval
+        self.complete_stage_approval = complete_stage_approval
 
     @staticmethod
     def _canonical_hash(value: Any) -> str:
@@ -100,7 +131,7 @@ class WorkflowRunner:
         encoded = json.dumps(identity, sort_keys=True, ensure_ascii=False).encode("utf-8")
         return hashlib.sha256(encoded).hexdigest()
 
-    def _validate_completed_stage_replay(self, stage_key: str, acquisition: dict[str, Any]) -> None:
+    def _validate_completed_stage_replay(self, workflow_id: str, stage_key: str, acquisition: dict[str, Any]) -> None:
         """Read-only consistency gate before a completed stage is reused."""
         task_id = acquisition.get("task_id")
         if task_id is None:
@@ -152,11 +183,25 @@ class WorkflowRunner:
             )
         protected = sorted(set(required_permissions) & PRIVILEGED)
         if protected:
-            raise WorkflowCheckpointBlocked(
-                f"Completed stage {stage_key} requires privileged permission(s) "
-                + ", ".join(protected)
-                + "; approval consumption is not durably linked to this task, so human review is required."
-            )
+            if len(protected) != 1:
+                raise WorkflowCheckpointBlocked(f"Completed stage {stage_key} has multiple privileged scopes.")
+            execution_id = payload.get("execution_id")
+            approval_reference = payload.get("approval_reference")
+            get_execution = getattr(self.checkpoint_store, "get_approval_execution_intent", None)
+            get_stage = getattr(self.checkpoint_store, "get_workflow_stage_approval_intent", None)
+            if not execution_id or not approval_reference or not callable(get_execution) or not callable(get_stage):
+                raise WorkflowCheckpointBlocked(f"Completed protected stage {stage_key} lacks durable approval evidence.")
+            execution = get_execution(execution_id)
+            stage = get_stage(workflow_id, stage_key)
+            if (not isinstance(execution, dict) or not isinstance(stage, dict)
+                    or execution.get("state") != "completed" or execution.get("task_id") != task_id
+                    or execution.get("permission") != protected[0]
+                    or execution.get("workflow_id") != workflow_id or execution.get("stage_key") != stage_key
+                    or stage.get("state") != "completed" or stage.get("execution_id") != execution_id
+                    or stage.get("task_id") != task_id or stage.get("permission") != protected[0]
+                    or stage.get("approval_id") != approval_reference
+                    or stage.get("action_digest") != execution.get("action_digest")):
+                raise WorkflowCheckpointBlocked(f"Completed protected stage {stage_key} approval binding does not reconcile.")
 
         idempotency_key = payload.get("idempotency_key")
         if idempotency_key:
@@ -244,10 +289,52 @@ class WorkflowRunner:
                 stage_key = f"{stage_index:04d}:{name}"
                 try:
                     stage_hash = self._stage_hash(stage_key, args)
+                    protected_permission = self.stage_approval_permissions.get(name)
+                    stage_rows = checkpoint_store.list_workflow_stages(workflow_id)
+                    existing_stage = next((row for row in stage_rows if row.get("stage_key") == stage_key), None)
+                    stage_approval_intent = None
+                    stage_approval = None
+                    if protected_permission and existing_stage is None:
+                        stage_approval_intent = checkpoint_store.get_workflow_stage_approval_intent(workflow_id, stage_key)
+                        if stage_approval_intent is None:
+                            prepared = self.prepare_stage_approval(workflow_id, stage_key, stage_hash, args, protected_permission)
+                            required = ("execution_id", "task_id", "action_digest", "permission")
+                            if (not isinstance(prepared, dict)
+                                    or any(not isinstance(prepared.get(k), str) or not prepared[k].strip() for k in required)
+                                    or prepared["permission"] != protected_permission):
+                                raise RuntimeError("Stage approval preparation returned an incomplete binding.")
+                            stage_approval_intent = checkpoint_store.create_workflow_stage_approval_intent(
+                                workflow_id, stage_key, stage_hash, prepared["execution_id"], prepared["task_id"],
+                                prepared["action_digest"], protected_permission
+                            )
+                            stage_approval_intent = dict(stage_approval_intent)
+                            if isinstance(prepared.get("action_details"), dict):
+                                stage_approval_intent["action_details"] = prepared["action_details"]
+                        elif (stage_approval_intent.get("stage_request_hash") != stage_hash
+                              or stage_approval_intent.get("permission") != protected_permission):
+                            raise RuntimeError("The prepared approval belongs to different stage inputs.")
+                        stage_approval = self.stage_approvals.get(stage_key)
+                        if stage_approval is None:
+                            pending = {
+                                "workflow_id": workflow_id, "stage_key": stage_key,
+                                "execution_id": stage_approval_intent["execution_id"],
+                                "task_id": stage_approval_intent["task_id"],
+                                "action_digest": stage_approval_intent["action_digest"],
+                                "permission": protected_permission, "state": stage_approval_intent["state"],
+                            }
+                            if isinstance(stage_approval_intent.get("action_details"), dict):
+                                pending["action_details"] = stage_approval_intent["action_details"]
+                            raise WorkflowAwaitingApproval(pending)
+                        if (getattr(stage_approval, "action_digest", None) != stage_approval_intent["action_digest"]
+                                or protected_permission not in getattr(stage_approval, "approved_permissions", ())
+                                or stage_approval_intent.get("state") != "awaiting_approval"):
+                            raise RuntimeError("Approval does not match this exact workflow stage digest, permission and state.")
                     attempt_token = uuid.uuid4().hex
                     acquisition = checkpoint_store.begin_workflow_stage(
                         workflow_id, stage_key, stage_index, stage_hash, attempt_token
                     )
+                except WorkflowAwaitingApproval:
+                    raise
                 except Exception as exc:
                     checkpoint_blocked = True
                     raise WorkflowCheckpointBlocked(
@@ -255,7 +342,7 @@ class WorkflowRunner:
                     ) from exc
 
                 if acquisition.get("status") == "completed":
-                    self._validate_completed_stage_replay(stage_key, acquisition)
+                    self._validate_completed_stage_replay(workflow_id, stage_key, acquisition)
                     stored = acquisition.get("result")
                     if not isinstance(stored, dict) or "value" not in stored:
                         checkpoint_blocked = True
@@ -266,7 +353,16 @@ class WorkflowRunner:
                     replayed = True
                 elif acquisition.get("can_execute") is True:
                     try:
-                        value = callback(*args)
+                        if protected_permission and stage_approval_intent is not None:
+                            value = self.execute_stage_approval(
+                                workflow_id, stage_key, callback, args, stage_approval_intent, stage_approval
+                            )
+                            if not self.complete_stage_approval(
+                                workflow_id, stage_key, stage_approval_intent, stage_approval, value
+                            ):
+                                raise RuntimeError("Stage approval completion could not be verified.")
+                        else:
+                            value = callback(*args)
                         completed = checkpoint_store.complete_workflow_stage(
                             workflow_id, stage_key, attempt_token,
                             value.get("task_id") if isinstance(value, dict) else None,
@@ -308,6 +404,7 @@ class WorkflowRunner:
                             stage_key,
                         )
                         next_state = dict(current_state)
+                        next_state.pop("pending_approval", None)
                         next_state["completed_stages"] = merged_keys
                         next_state["last_completed_stage"] = latest
                         saved = checkpoint_store.save_workflow_checkpoint(
@@ -395,6 +492,24 @@ class WorkflowRunner:
                     )
                     break
                 result.corrections += 1
+        except WorkflowAwaitingApproval as exc:
+            checkpoint_blocked = True
+            result.status = "waiting_approval"
+            result.pending_approval = dict(exc.pending)
+            try:
+                current = checkpoint_store.get_workflow_checkpoint(workflow_id)
+                if not current or current.get("status") != "running" or not isinstance(current.get("state"), dict):
+                    raise RuntimeError("Workflow checkpoint is unavailable while pausing.")
+                state = dict(current["state"])
+                state["pending_approval"] = dict(exc.pending)
+                if not checkpoint_store.save_workflow_checkpoint(
+                    workflow_id, int(current["revision"]), "running", exc.pending.get("stage_key"), state
+                ):
+                    raise RuntimeError("Workflow checkpoint revision changed while recording pending approval.")
+            except Exception:
+                result.status = "blocked_execution"
+                result.pending_approval = None
+                result.error = "Approval was prepared, but the workflow pause could not be durably recorded."
         except WorkflowCheckpointBlocked as exc:
             checkpoint_blocked = True
             result.status = "blocked_execution"
@@ -429,6 +544,7 @@ class WorkflowRunner:
                         if item.get("status") == "completed"
                     ]
                     state = dict(current.get("state") or {})
+                    state.pop("pending_approval", None)
                     prior_keys = state.get("completed_stages", [])
                     if not isinstance(prior_keys, list):
                         raise RuntimeError("Workflow completed-stage index is malformed.")

@@ -137,3 +137,24 @@ This file is append-only. Each entry records one bounded engineering increment a
 - **Preservation:** source branch and all pre-existing repository paths remain intact; no production database, Neon branch, Render service, deployment, provider, credential, existing user record, PWA or source archive was changed. CI uses an ephemeral PostgreSQL service only.
 - **Costs:** no dependency, external service, provider call, paid API, infrastructure or production migration added. GitHub Actions account-level billing remains unobservable.
 - **Next:** observe the full CI run; repair only evidence-backed failures; then append exact tested SHA, command, counts and job outcomes to this log.
+
+
+### Run 11 CI verification — 2026-11-15 — initial implementation result
+
+- **CI run:** [43696572852](https://github.com/soueilouay-creator/uneXxxx/actions/runs/43696572852), tested commit `f3e312dd0436409179ad4ee771a3919f737d1c5d`.
+- **Migration and preservation rehearsal:** passed. Migrations 001–004 were applied to ephemeral PostgreSQL, synthetic pre-005 task/event/memory records were seeded, migration 005 applied, and all three rows read back unchanged.
+- **Static checks:** runtime compile, JavaScript syntax, YAML/Bash validation, resource contracts and SHA-256 inventory passed.
+- **Runtime suite:** `Ran 408 tests in 74.118s`; `FAILED (failures=1, errors=2, skipped=3)`. Two new adapter contract errors showed that a stale expected state/revision must return false before illegal-transition validation. One existing PostgreSQL queue test claimed the task created by the new preservation fixture; the fixture had left a queued synthetic task in the shared ephemeral CI database.
+- **Renderer job:** still running at the time of this update; no renderer result is claimed here.
+- **Correction plan:** make stale compare-and-set requests return false when persisted state/revision has moved; keep an exception for an illegal transition at the current revision; finish the preservation fixture task to avoid polluting subsequent PG tests; constrain the new state set to the six states specified by the saved approval-binding design.
+- **No production effects:** ephemeral CI database only; no Neon/Render production access, deployment, provider call or user-data migration.
+
+## Run 12 — 2026-11-15 — Stale revision handling and CI fixture isolation
+
+- **Phase:** Phase 3, durable execution; approval-intent storage refinement.
+- **Baseline and rollback:** resumed the same draft PR #16 at `f3e312dd0436409179ad4ee771a3919f737d1c5d`; that commit remains the rollback point. Default branch `main` remains `d04b651774b7699f3430dc36972c2de74c587839`.
+- **Changes:** in both SQLite and PostgreSQL adapters, stale expected state/revision requests now return false before illegal-transition validation; illegal transitions at the current expected state/revision still raise ValueError. Intent states now match the six-state design (`prepared`, `awaiting_approval`, `approved`, `enqueued`, `completed`, `blocked`). Added an explicit blocked-terminal regression. The preservation contract test now marks its synthetic queued task complete so it cannot interfere with subsequent queue tests sharing the ephemeral PostgreSQL database.
+- **Migration compatibility:** PostgreSQL migration 005 remains additive and idempotent; only the state CHECK constraint was narrowed before merge/use. SQLite initialization adds the same six-state check for newly created intent tables. No production database has received migration 005.
+- **Verification:** new CI pending. Prior failed CI evidence and the exact errors remain recorded above; no green claim until the full suite passes on the new head.
+- **Next:** review the rerun's focused intent contract and full regression suite; run process/connection concurrency evidence, then move to Task 2 approval binding only after Task 1 is green.
+- **Costs/preservation:** no dependencies, paid tests, API credits, paid infrastructure, deployment or production writes. Existing tasks/events/memories and all non-target files remain preserved; GitHub Actions account-level billing is not visible.

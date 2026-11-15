@@ -59,7 +59,7 @@ class StateStore:
                 permission TEXT NOT NULL CHECK(length(trim(permission))>0),
                 workflow_id TEXT,
                 stage_key TEXT,
-                state TEXT NOT NULL CHECK(state IN ('prepared','awaiting_approval','approved','rejected','enqueued','completed','failed','blocked')),
+                state TEXT NOT NULL CHECK(state IN ('prepared','awaiting_approval','approved','enqueued','completed','blocked')),
                 revision INTEGER NOT NULL DEFAULT 0 CHECK(revision>=0),
                 created_at REAL NOT NULL,
                 updated_at REAL NOT NULL,
@@ -331,10 +331,10 @@ class StateStore:
 
     _APPROVAL_INTENT_TRANSITIONS = {
         "prepared": {"awaiting_approval", "blocked"},
-        "awaiting_approval": {"approved", "rejected", "blocked"},
+        "awaiting_approval": {"approved", "blocked"},
         "approved": {"enqueued", "blocked"},
-        "enqueued": {"completed", "failed", "blocked"},
-        "rejected": set(), "completed": set(), "failed": set(), "blocked": set(),
+        "enqueued": {"completed", "blocked"},
+        "completed": set(), "blocked": set(),
     }
 
     def create_approval_execution_intent(self, intent_id: str, task_id: str,
@@ -391,7 +391,16 @@ class StateStore:
             raise ValueError("expected_revision must be a non-negative integer.")
         if expected_state not in self._APPROVAL_INTENT_TRANSITIONS:
             raise ValueError("expected_state is not a supported approval execution intent state.")
+        if next_state not in self._APPROVAL_INTENT_TRANSITIONS:
+            raise ValueError("next_state is not a supported approval execution intent state.")
         if next_state not in self._APPROVAL_INTENT_TRANSITIONS[expected_state]:
+            with self._session() as c:
+                current = c.execute(
+                    "SELECT state,revision FROM approval_execution_intents WHERE intent_id=?",
+                    (intent_id,),
+                ).fetchone()
+            if current is None or current["state"] != expected_state or int(current["revision"]) != expected_revision:
+                return False
             raise ValueError(f"Illegal approval execution intent transition: {expected_state} -> {next_state}.")
         with self._session() as c:
             cursor = c.execute(

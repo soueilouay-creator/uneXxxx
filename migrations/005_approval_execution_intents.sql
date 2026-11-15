@@ -11,8 +11,7 @@ CREATE TABLE IF NOT EXISTS approval_execution_intents (
     workflow_id TEXT,
     stage_key TEXT,
     state TEXT NOT NULL CHECK (state IN (
-        'prepared', 'awaiting_approval', 'approved', 'rejected',
-        'enqueued', 'completed', 'failed', 'blocked'
+        'prepared', 'awaiting_approval', 'approved', 'enqueued', 'completed', 'blocked'
     )),
     revision BIGINT NOT NULL DEFAULT 0 CHECK (revision >= 0),
     created_at DOUBLE PRECISION NOT NULL,

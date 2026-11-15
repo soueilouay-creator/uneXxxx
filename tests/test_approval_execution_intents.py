@@ -51,6 +51,9 @@ class ApprovalExecutionIntentStoreContract:
             inputs={"preservation_fixture": True},
         )
         self.store.enqueue(request)
+        self.assertTrue(self.store.mark_task(
+            request.task_id, "completed", {"preservation_fixture": "completed"}
+        ))
         self.store.set_memory("orchestrator", "approval-intent-preservation", {"keep": "memory"})
         self.store.log_event(
             "approval_intent_preservation", request.task_id, "orchestrator", {"keep": "event"}
@@ -116,6 +119,20 @@ class ApprovalExecutionIntentStoreContract:
         values = intent_values(permission="")
         with self.assertRaises(ValueError):
             self.store.create_approval_execution_intent(**values)
+
+    def test_blocked_intent_is_terminal(self):
+        created = self.create()
+        self.assertTrue(self.store.transition_approval_execution_intent(
+            created["intent_id"], "prepared", "blocked", 0
+        ))
+        current = self.store.get_approval_execution_intent(created["intent_id"])
+        self.assertEqual(current["state"], "blocked")
+        self.assertEqual(current["revision"], 1)
+        with self.assertRaises(ValueError):
+            self.store.transition_approval_execution_intent(
+                created["intent_id"], "blocked", "prepared", 1
+            )
+        self.assertEqual(self.store.get_approval_execution_intent(created["intent_id"]), current)
 
     def test_transitions_use_expected_state_and_revision(self):
         created = self.create()

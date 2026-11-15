@@ -346,10 +346,10 @@ class PostgresStateStore(PostgresIdempotencyMixin):
 
     _APPROVAL_INTENT_TRANSITIONS = {
         "prepared": {"awaiting_approval", "blocked"},
-        "awaiting_approval": {"approved", "rejected", "blocked"},
+        "awaiting_approval": {"approved", "blocked"},
         "approved": {"enqueued", "blocked"},
-        "enqueued": {"completed", "failed", "blocked"},
-        "rejected": set(), "completed": set(), "failed": set(), "blocked": set(),
+        "enqueued": {"completed", "blocked"},
+        "completed": set(), "blocked": set(),
     }
 
     @staticmethod
@@ -418,7 +418,17 @@ class PostgresStateStore(PostgresIdempotencyMixin):
             raise ValueError("expected_revision must be a non-negative integer.")
         if expected_state not in self._APPROVAL_INTENT_TRANSITIONS:
             raise ValueError("expected_state is not a supported approval execution intent state.")
+        if next_state not in self._APPROVAL_INTENT_TRANSITIONS:
+            raise ValueError("next_state is not a supported approval execution intent state.")
         if next_state not in self._APPROVAL_INTENT_TRANSITIONS[expected_state]:
+            with self._session() as connection:
+                self._require_approval_execution_intents_schema(connection)
+                current = connection.execute(
+                    "SELECT state,revision FROM approval_execution_intents WHERE intent_id=%s",
+                    (intent_id,),
+                ).fetchone()
+            if current is None or current["state"] != expected_state or int(current["revision"]) != expected_revision:
+                return False
             raise ValueError(f"Illegal approval execution intent transition: {expected_state} -> {next_state}.")
         with self._session() as connection:
             self._require_approval_execution_intents_schema(connection)

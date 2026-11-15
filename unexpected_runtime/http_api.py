@@ -594,7 +594,7 @@ def create_server(*, coordinator=None, api_token=None, host="127.0.0.1", port=0)
                     return self.send_json(response_status,response_body)
                 except OSError:
                     return
-            allowed=({"agent_id","objective","inputs","deadline_seconds","max_corrections","max_improvements","provider_route","workflow_id"}
+            allowed=({"agent_id","objective","inputs","deadline_seconds","max_corrections","max_improvements","provider_route","workflow_id","stage_permissions","stage_approvals"}
                      if is_lifecycle else
                      ({"agent_id","objective","inputs","deadline_seconds","max_steps","idempotency_key","source_refs","provider_route","skill_ids","required_permission","workflow_id","stage_key"}
                       if is_approval_intent else
@@ -616,6 +616,8 @@ def create_server(*, coordinator=None, api_token=None, host="127.0.0.1", port=0)
             stage_key=body.get("stage_key")
             required_permission=body.get("required_permission")
             required_permissions=body.get("required_permissions",[])
+            stage_permissions=body.get("stage_permissions",{})
+            stage_approval_data=body.get("stage_approvals",{})
             if not isinstance(agent,str) or not agent.strip() or not isinstance(objective,str) or not objective.strip():
                 return self.send_json(400,{"error":"agent_id and objective are required."})
             if len(objective)>MAX_OBJECTIVE_CHARS: return self.send_json(413,{"error":"Objective too large."})
@@ -647,6 +649,41 @@ def create_server(*, coordinator=None, api_token=None, host="127.0.0.1", port=0)
                         or any(not isinstance(x,str) or not x.strip() or len(x)>128 for x in skill_ids)
                         or len(set(skill_ids))!=len(skill_ids)):
                     return self.send_json(400,{"error":"skill_ids must be a list of at most 4 unique non-empty skill IDs."})
+                if is_lifecycle:
+                    allowed_stage_names={"plan","execute","verify","improve"}
+                    if (not isinstance(stage_permissions,dict) or len(stage_permissions)>4
+                            or any(k not in allowed_stage_names or not isinstance(v,str) or not v.strip()
+                                   for k,v in stage_permissions.items())):
+                        return self.send_json(400,{"error":"stage_permissions must map supported stages to permission names."})
+                    if not isinstance(stage_approval_data,dict) or len(stage_approval_data)>24:
+                        return self.send_json(400,{"error":"stage_approvals must be an object keyed by numbered workflow stage."})
+                    stage_approvals={}
+                    approval_fields={"approval_id","approver","approved_permissions","rationale","created_at","action_digest"}
+                    approval_required={"approval_id","approver","approved_permissions","rationale","action_digest"}
+                    for key, approval in stage_approval_data.items():
+                        if (not isinstance(key,str) or len(key)<6 or not key[:4].isdigit()
+                                or key[4] != ":" or key[5:] not in allowed_stage_names):
+                            return self.send_json(400,{"error":"Invalid stage_approvals stage key."})
+                        if (not isinstance(approval,dict) or set(approval)-approval_fields
+                                or not approval_required.issubset(approval)
+                                or any(not isinstance(approval.get(k),str) or not approval[k].strip()
+                                       for k in ("approval_id","approver","rationale","action_digest"))
+                                or not isinstance(approval.get("approved_permissions"),list)
+                                or len(approval["approved_permissions"])>8
+                                or any(not isinstance(x,str) or not x for x in approval["approved_permissions"])
+                                or len(set(approval["approved_permissions"]))!=len(approval["approved_permissions"])):
+                            return self.send_json(400,{"error":"Invalid structured approval in stage_approvals."})
+                        created_at=approval.get("created_at")
+                        if created_at is not None and (isinstance(created_at,bool) or not isinstance(created_at,(int,float)) or not math.isfinite(float(created_at))):
+                            return self.send_json(400,{"error":"stage approval created_at must be a finite timestamp."})
+                        from .models import ApprovalContext
+                        kwargs={"approval_id":approval["approval_id"],"approver":approval["approver"],
+                                "approved_permissions":frozenset(approval["approved_permissions"]),
+                                "rationale":approval["rationale"],"action_digest":approval["action_digest"]}
+                        if created_at is not None: kwargs["created_at"]=float(created_at)
+                        stage_approvals[key]=ApprovalContext(**kwargs)
+                    if stage_approvals and not stage_permissions:
+                        return self.send_json(400,{"error":"stage_approvals cannot be supplied without stage_permissions."})
                 if is_approval_intent:
                     if not isinstance(required_permission,str) or not required_permission.strip():
                         return self.send_json(400,{"error":"required_permission is required."})
@@ -711,7 +748,9 @@ def create_server(*, coordinator=None, api_token=None, host="127.0.0.1", port=0)
                                                     max_corrections=corrections,
                                                     max_improvements=improvements,
                                                     provider_route=provider_route,
-                                                    workflow_id=workflow_id).to_dict()
+                                                    workflow_id=workflow_id,
+                                                    stage_permissions=stage_permissions,
+                                                    stage_approvals=stage_approvals).to_dict()
                     finally:
                         lifecycle_slots.release()
                     success=result.get("status")=="delivered" and result.get("delivered") is True
@@ -732,6 +771,8 @@ def create_server(*, coordinator=None, api_token=None, host="127.0.0.1", port=0)
                                          required_permissions=tuple(required_permissions),execution_id=body.get("execution_id"),
                                          approval=approval_context).to_dict()
                     success=result.get("status")=="completed"
+                if is_lifecycle and result.get("status") == "waiting_approval":
+                    return self.send_json(202,{"result":result})
                 return self.send_json(200 if success else 502,{"result":result})
             except Exception as exc: return self.send_json(400,{"error":f"Task rejected or failed ({type(exc).__name__})."})
     server=ThreadingHTTPServer((host,int(port)),Handler)

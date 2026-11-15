@@ -432,6 +432,38 @@ class Coordinator:
             row=self.store.claim_next()
             if not row: break
             d=json.loads(row['payload_json']); req=TaskRequest(task_id=d['task_id'],agent_id=d['agent_id'],objective=d['objective'],inputs=d.get('inputs',{}),required_permissions=tuple(d.get('required_permissions',[])),deadline_seconds=d.get('deadline_seconds',30),max_steps=d.get('max_steps',6),idempotency_key=d.get('idempotency_key'),source_refs=tuple(d.get('source_refs',[])),provider_route=d.get('provider_route'),requested_skill_ids=tuple(d.get('requested_skill_ids',[])),parent_task_id=d.get('parent_task_id'),execution_id=d.get('execution_id'),approval_reference=d.get('approval_reference'),created_at=d.get('created_at',time.time()))
+            protected = sorted(set(req.required_permissions) & PRIVILEGED)
+            if protected:
+                # A consumed approval is never a recovery token. Do not redispatch
+                # privileged queued/running work after a process crash.
+                reason = "Privileged queued task requires a new execution intent and approval; automatic replay is forbidden."
+                result = TaskResult(req.task_id, req.agent_id, "failed", error=reason,
+                                    provenance=tuple(req.source_refs), finished_at=time.time())
+                self.store.mark_task(req.task_id, "failed", result.to_dict())
+                execution_id = d.get("execution_id")
+                if execution_id:
+                    try:
+                        intent = self.store.get_approval_execution_intent(execution_id)
+                        if intent and intent.get("state") == "enqueued":
+                            self.store.transition_approval_execution_intent(
+                                execution_id, "enqueued", "blocked", int(intent["revision"])
+                            )
+                            if intent.get("workflow_id") and intent.get("stage_key"):
+                                stage = self.store.get_workflow_stage_approval_intent(
+                                    intent["workflow_id"], intent["stage_key"]
+                                )
+                                if stage and stage.get("state") == "enqueued":
+                                    self.store.transition_workflow_stage_approval_intent(
+                                        intent["workflow_id"], intent["stage_key"], "enqueued", "blocked",
+                                        int(stage["revision"])
+                                    )
+                    except Exception:
+                        # The task remains failed; a ledger error must never trigger execution.
+                        pass
+                self.store.log_event("privileged_task_recovery_blocked", req.task_id, req.agent_id,
+                                     {"execution_id": execution_id, "permission": protected[0]})
+                results.append(result)
+                continue
             results.append(self._execute_with_deadline(req,CancellationToken()))
         return results
     def cancel(self,task_id:str)->bool:

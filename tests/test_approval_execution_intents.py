@@ -11,13 +11,13 @@ from unexpected_runtime.postgres_storage import PostgresStateStore
 from unexpected_runtime.storage import StateStore
 
 
-def intent_values(*, intent_id=None, task_id=None, workflow_id=None, stage_key=None):
+def intent_values(*, intent_id=None, task_id=None, request_hash="a" * 64, action_digest="b" * 64, permission="repo_write", workflow_id=None, stage_key=None):
     return {
         "intent_id": intent_id or "intent-" + uuid.uuid4().hex,
         "task_id": task_id or "task-" + uuid.uuid4().hex,
-        "request_hash": "a" * 64,
-        "action_digest": "b" * 64,
-        "permission": "repo_write",
+        "request_hash": request_hash,
+        "action_digest": action_digest,
+        "permission": permission,
         "workflow_id": workflow_id,
         "stage_key": stage_key,
     }

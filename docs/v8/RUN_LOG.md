@@ -102,3 +102,15 @@ This file is append-only. Each entry records one bounded engineering increment a
 - **Preservation:** tests use a temporary SQLite database or the ephemeral PostgreSQL CI database. No existing task, approval, user data, production database, Neon branch, Render service, deployment, PWA, secret or provider was touched.
 - **Costs:** no new dependency, provider call, paid infrastructure, production migration or deployment. GitHub Actions account-level billing is not exposed.
 - **Next:** observe the focused CI failure for the missing methods, then implement the minimum additive SQLite/PostgreSQL intent contract and migration 005.
+
+
+## Run 10 — 2026-11-15 — Approval-intent red-test harness correction
+
+- **Phase:** Phase 3, durable execution; approval-binding Task 1 (test-first).
+- **Baseline:** rechecked core `main` at `d04b651774b7699f3430dc36972c2de74c587839`; resumed draft PR #16 on `upgrade/v8-workflow-checkpoint-ledger-20261111` at `74685047134bd1c289055241b3f3123e0a72a60b` (27 commits ahead, 0 behind). The compare reports no removed paths.
+- **Observed CI:** run [43579323788](https://github.com/soueilouay-creator/uneXxxx/actions/runs/43579323788) failed in the runtime job (405 tests, 16 errors, 3 skipped); renderer E2E passed. The new contract tests exposed the expected missing SQLite/PostgreSQL intent methods, but also revealed a test-helper TypeError because `intent_values()` did not accept the request-hash and permission overrides used by its validation test.
+- **Change:** corrected only the test helper signature and value forwarding in `tests/test_approval_execution_intents.py`. No runtime code, schema, migration, dependency, coordinator, permission verifier or approval ledger was changed. The previous test file remains recoverable from parent commit `74685047134bd1c289055241b3f3123e0a72a60b`.
+- **Verification:** SHA-256 inventory updated for the test and run log; a new CI run is required to prove the red stage contains only expected missing-method failures before implementation.
+- **Preservation:** no tracked path was removed; no existing task, event, memory, approval, user record, production database, Neon branch, Render service, deployment, PWA, source archive, setting or secret was accessed or changed.
+- **Costs:** no new package, provider/API call, generation credit, paid infrastructure, migration or deployment. GitHub Actions account-level billing is not visible.
+- **Next:** verify the corrected red suite, then implement the smallest additive SQLite/PostgreSQL execution-intent storage contract and migration 005.

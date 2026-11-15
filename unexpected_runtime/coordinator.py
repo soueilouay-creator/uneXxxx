@@ -460,8 +460,8 @@ class Coordinator:
                     except Exception:
                         # The task remains failed; a ledger error must never trigger execution.
                         pass
-                self.store.log_event("privileged_task_recovery_blocked", req.task_id, req.agent_id,
-                                     {"execution_id": execution_id, "permission": protected[0]})
+                self.store.log_event("privileged_task_recovery_blocked", task_id=req.task_id, agent_id=req.agent_id,
+                                     payload={"execution_id": execution_id, "permission": protected[0]})
                 results.append(result)
                 continue
             results.append(self._execute_with_deadline(req,CancellationToken()))

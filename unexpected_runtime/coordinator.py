@@ -3,11 +3,11 @@ from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from typing import Any
 import json, os, time, uuid, hashlib, math
-from .models import TaskRequest, AgentMessage, TaskResult, CancellationToken, ApprovalContext, PermissionDenied, CycleLimitError, BudgetExceeded, UnknownAgent
+from .models import TaskRequest, AgentMessage, TaskResult, CancellationToken, ApprovalContext, ApprovalExecutionBinding, PermissionDenied, CycleLimitError, BudgetExceeded, UnknownAgent
 from .registry import AgentRegistry
 from .providers import provider_router_from_env
-from .permissions import PermissionPolicy
-from .approvals import ApprovalVerifier, approval_verifier_from_env
+from .permissions import PermissionPolicy, PRIVILEGED
+from .approvals import ApprovalVerifier, approval_verifier_from_env, canonical_action_digest
 from .storage import StateStore
 from .skills import SkillRegistry, SkillRegistryError
 from .capabilities import CapabilityRegistry
@@ -84,19 +84,162 @@ class Coordinator:
     @staticmethod
     def invoke_action_details(agent_id:str, objective:str, inputs:dict[str,Any]|None=None, *, required_permissions=(),
                               deadline_seconds:float=30.0, max_steps:int=6, source_refs=(), requested_skill_ids=(),
-                              parent_task_id:str|None=None):
+                              parent_task_id:str|None=None, provider_route:str|None=None,
+                              idempotency_key:str|None=None, execution_binding:dict[str,Any]|None=None):
         encode=lambda value: hashlib.sha256(json.dumps(value,sort_keys=True,ensure_ascii=False,separators=(',',':')).encode()).hexdigest()
-        return {'action':'agent.invoke','agent_id':agent_id,'objective_sha256':encode(objective),
-                'inputs_sha256':encode(inputs or {}),'source_refs_sha256':encode(list(source_refs)),
-                'required_permissions':sorted(set(required_permissions)),
-                'requested_skill_ids':list(requested_skill_ids),
-                'parent_task_id':parent_task_id,
-                'deadline_seconds':float(deadline_seconds),'max_steps':int(max_steps)}
+        details={'action':'agent.invoke','agent_id':agent_id,'objective_sha256':encode(objective),
+                 'inputs_sha256':encode(inputs or {}),'source_refs_sha256':encode(list(source_refs)),
+                 'required_permissions':sorted(set(required_permissions)),
+                 'requested_skill_ids':list(requested_skill_ids),'parent_task_id':parent_task_id,
+                 'provider_route':provider_route,
+                 'idempotency_key_sha256':encode(idempotency_key) if idempotency_key else None,
+                 'deadline_seconds':float(deadline_seconds),'max_steps':int(max_steps)}
+        if execution_binding is not None:
+            details['execution_binding']=dict(execution_binding)
+        return details
+
+    @staticmethod
+    def _invoke_request_hash(agent_id, objective, inputs, required_permissions, source_refs,
+                             provider_route, requested_skill_ids, parent_task_id):
+        identity={'agent_id':agent_id,'objective':objective,'inputs':inputs or {},
+                  'required_permissions':list(required_permissions),'source_refs':list(source_refs),
+                  'provider_route':provider_route,'requested_skill_ids':list(requested_skill_ids),
+                  'parent_task_id':parent_task_id}
+        return hashlib.sha256(json.dumps(identity,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
+
+    def prepare_invoke(self, agent_id:str, objective:str, inputs:dict[str,Any]|None=None, *,
+                       required_permissions=(), required_permission:str|None=None,
+                       deadline_seconds:float=30.0, max_steps:int=6, idempotency_key=None,
+                       source_refs=(), provider_route:str|None=None, requested_skill_ids=(),
+                       parent_task_id:str|None=None, workflow_id:str|None=None,
+                       stage_key:str|None=None) -> dict[str,Any]:
+        """Persist an exact approval intent without enqueueing or dispatching a task."""
+        if required_permission is not None:
+            if required_permissions:
+                raise ValueError('Supply only one of required_permission or required_permissions.')
+            required_permissions=(required_permission,)
+        if isinstance(required_permissions,str):
+            raise ValueError('required_permissions must be a sequence containing one permission.')
+        scopes=tuple(required_permissions)
+        if len(scopes)!=1 or scopes[0] not in PRIVILEGED:
+            raise PermissionDenied('Approval preparation requires exactly one privileged permission scope.')
+        if not isinstance(objective,str) or not objective.strip() or len(objective)>16000:
+            raise ValueError('objective must be a non-empty string of at most 16000 characters.')
+        if inputs is not None and not isinstance(inputs,dict):
+            raise TypeError('inputs must be a dictionary.')
+        if isinstance(deadline_seconds,bool) or not isinstance(deadline_seconds,(int,float)) or not math.isfinite(float(deadline_seconds)) or not 0<float(deadline_seconds)<=600:
+            raise ValueError('deadline_seconds must be finite and between 0 and 600.')
+        if isinstance(max_steps,bool) or not isinstance(max_steps,int) or not 1<=max_steps<=12:
+            raise BudgetExceeded('max_steps must be between 1 and 12.')
+        if idempotency_key is not None and (not isinstance(idempotency_key,str) or not idempotency_key.strip() or len(idempotency_key)>128):
+            raise ValueError('Invalid idempotency key.')
+        if not isinstance(source_refs,(tuple,list)) or len(source_refs)>32 or any(not isinstance(x,str) or not x or len(x)>2048 for x in source_refs):
+            raise ValueError('Invalid source_refs.')
+        if (workflow_id is None)!=(stage_key is None):
+            raise ValueError('workflow_id and stage_key must be supplied together.')
+        for name,value in (('workflow_id',workflow_id),('stage_key',stage_key)):
+            if value is not None and (not isinstance(value,str) or not value.strip() or len(value)>128 or any(ord(ch)<32 for ch in value)):
+                raise ValueError(name+' must be a non-empty string of at most 128 safe characters.')
+        self.registry.get(agent_id)
+        skills=self.skills.validate_requested(agent_id,requested_skill_ids)
+        if provider_route is not None:
+            if not isinstance(provider_route,str) or not provider_route.strip() or not hasattr(self.provider,'resolve'):
+                raise ValueError('provider_route is unavailable.')
+            self.provider.resolve(provider_route)
+        execution_id,task_id=str(uuid.uuid4()),str(uuid.uuid4())
+        binding=ApprovalExecutionBinding(execution_id,task_id,workflow_id,stage_key)
+        details=self.invoke_action_details(agent_id,objective,inputs or {},required_permissions=scopes,
+            deadline_seconds=float(deadline_seconds),max_steps=max_steps,source_refs=source_refs,
+            requested_skill_ids=skills,parent_task_id=parent_task_id,provider_route=provider_route,
+            idempotency_key=idempotency_key,execution_binding=binding.to_dict())
+        digest=canonical_action_digest(details)
+        request_hash=self._invoke_request_hash(agent_id,objective,inputs or {},scopes,source_refs,
+                                                provider_route,skills,parent_task_id)
+        intent=self.store.create_approval_execution_intent(
+            execution_id,task_id,request_hash,digest,scopes[0],workflow_id,stage_key)
+        if intent['state']=='prepared':
+            if not self.store.transition_approval_execution_intent(execution_id,'prepared','awaiting_approval',int(intent['revision'])):
+                raise PermissionDenied('Approval intent could not be activated; prepare a new intent.')
+            intent=self.store.get_approval_execution_intent(execution_id)
+        if not intent or intent.get('state')!='awaiting_approval':
+            raise PermissionDenied('This approval intent is no longer awaiting a first approval.')
+        return {'execution_id':execution_id,'task_id':task_id,'permission':scopes[0],
+                'action_details':details,'action_digest':digest,'request_hash':request_hash,
+                'workflow_id':workflow_id,'stage_key':stage_key,'state':'awaiting_approval'}
+
+    def _invoke_prepared_privileged(self, spec, agent_id, objective, inputs, *, required_permissions,
+                                    deadline_seconds, max_steps, idempotency_key, source_refs,
+                                    provider_route, token, approval, requested_skill_ids,
+                                    parent_task_id, execution_id):
+        if len(required_permissions)!=1 or required_permissions[0] not in PRIVILEGED:
+            raise PermissionDenied('A prepared approval may cover exactly one privileged permission.')
+        if not isinstance(execution_id,str) or not execution_id.strip() or not isinstance(approval,ApprovalContext):
+            raise PermissionDenied('A privileged invocation requires an execution_id and structured approval.')
+        intent=self.store.get_approval_execution_intent(execution_id)
+        if not isinstance(intent,dict) or intent.get('state')!='awaiting_approval':
+            raise PermissionDenied('The execution intent is missing, already used, or not awaiting approval.')
+        scope=required_permissions[0]
+        binding=ApprovalExecutionBinding(execution_id,intent['task_id'],intent.get('workflow_id'),intent.get('stage_key'))
+        details=self.invoke_action_details(agent_id,objective,inputs or {},required_permissions=required_permissions,
+            deadline_seconds=float(deadline_seconds),max_steps=max_steps,source_refs=source_refs,
+            requested_skill_ids=requested_skill_ids,parent_task_id=parent_task_id,provider_route=provider_route,
+            idempotency_key=idempotency_key,execution_binding=binding.to_dict())
+        digest=canonical_action_digest(details)
+        request_hash=self._invoke_request_hash(agent_id,objective,inputs or {},required_permissions,
+            source_refs,provider_route,requested_skill_ids,parent_task_id)
+        if (intent.get('permission')!=scope or intent.get('request_hash')!=request_hash
+                or intent.get('action_digest')!=digest or intent.get('task_id')!=binding.task_id
+                or intent.get('workflow_id')!=binding.workflow_id or intent.get('stage_key')!=binding.stage_key):
+            raise PermissionDenied('The invocation differs from the exact prepared action or execution identity.')
+        self.permissions.authorize_bound(spec,scope,approval,action_details=details,binding=binding)
+        reader=getattr(self.approval_verifier,'get_consumed_binding',None)
+        try:
+            consumed=reader(approval.approval_id) if callable(reader) else None
+        except Exception:
+            consumed=None
+        expected={'approval_id':approval.approval_id,'action_digest':digest,'permission':scope,
+                  'execution_id':execution_id,'task_id':binding.task_id,
+                  'workflow_id':binding.workflow_id,'stage_key':binding.stage_key}
+        if not isinstance(consumed,dict) or any(consumed.get(k)!=v for k,v in expected.items()):
+            self.store.transition_approval_execution_intent(execution_id,'awaiting_approval','blocked',int(intent['revision']))
+            raise PermissionDenied('The one-use approval ledger did not confirm the exact execution binding.')
+        if idempotency_key:
+            claim=self.store.claim_idempotency(idempotency_key,request_hash,binding.task_id)
+            if claim.get('state')!='claimed' or claim.get('task_id')!=binding.task_id:
+                self.store.transition_approval_execution_intent(execution_id,'awaiting_approval','blocked',int(intent['revision']))
+                raise PermissionDenied('The idempotency claim is unavailable; prepare a fresh intent.')
+        if not self.store.transition_approval_execution_intent(execution_id,'awaiting_approval','approved',int(intent['revision'])):
+            raise PermissionDenied('The approval intent revision changed; this approval cannot be rebound.')
+        approved_revision=int(intent['revision'])+1
+        req=TaskRequest.create(agent_id,objective,task_id=binding.task_id,inputs=inputs or {},
+            required_permissions=tuple(required_permissions),deadline_seconds=deadline_seconds,max_steps=max_steps,
+            idempotency_key=idempotency_key,source_refs=tuple(source_refs),provider_route=provider_route,
+            requested_skill_ids=tuple(requested_skill_ids),parent_task_id=parent_task_id,
+            execution_id=execution_id,approval_reference=approval.approval_id)
+        try:
+            self.store.enqueue_approved_task(req,execution_id,approved_revision)
+        except Exception:
+            self.store.transition_approval_execution_intent(execution_id,'approved','blocked',approved_revision)
+            if idempotency_key:
+                self.store.fail_idempotency(idempotency_key,binding.task_id,
+                    TaskResult(binding.task_id,agent_id,'failed',error='Approved task could not be enqueued.').to_dict())
+            raise
+        enqueued_revision=approved_revision+1
+        result=self._execute_with_deadline(req,token or CancellationToken())
+        next_state='completed' if result.status=='completed' else 'blocked'
+        self.store.transition_approval_execution_intent(execution_id,'enqueued',next_state,enqueued_revision)
+        if idempotency_key:
+            if result.status=='completed':
+                self.store.complete_idempotency(idempotency_key,binding.task_id,result.to_dict())
+                self.store.set_idempotent(idempotency_key,request_hash,result.to_dict())
+            else:
+                self.store.fail_idempotency(idempotency_key,binding.task_id,result.to_dict())
+        return result
     @staticmethod
     def shared_knowledge_action_details(knowledge_id:str):
         return {'action':'shared_knowledge.approve','knowledge_id':knowledge_id,'required_permissions':['approve_knowledge']}
     def invoke(self, agent_id:str, objective:str, inputs:dict[str,Any]|None=None, *, required_permissions=(), deadline_seconds=30.0,
-               max_steps=6,idempotency_key=None,source_refs=(),provider_route:str|None=None,token:CancellationToken|None=None,approval:ApprovalContext|None=None,requested_skill_ids=(),parent_task_id:str|None=None):
+               max_steps=6,idempotency_key=None,source_refs=(),provider_route:str|None=None,token:CancellationToken|None=None,approval:ApprovalContext|None=None,requested_skill_ids=(),parent_task_id:str|None=None,execution_id:str|None=None):
         spec=self.registry.get(agent_id)
         requested_skill_ids=self.skills.validate_requested(agent_id, requested_skill_ids)
         if provider_route is not None:
@@ -109,8 +252,16 @@ class Coordinator:
                                                   requested_skill_ids=requested_skill_ids,parent_task_id=parent_task_id)
         if len(set(required_permissions)) > 1:
             raise PermissionDenied('A single action may request only one privileged permission scope; split and approve separate actions.')
-        for scope in required_permissions: self.permissions.authorize(spec,scope,approval,action_details=action_details)
-        request_hash=hashlib.sha256(json.dumps({'agent_id':agent_id,'objective':objective,'inputs':inputs or {},'required_permissions':list(required_permissions),'source_refs':list(source_refs),'provider_route':provider_route,'requested_skill_ids':list(requested_skill_ids),'parent_task_id':parent_task_id},sort_keys=True,ensure_ascii=False).encode()).hexdigest()
+        if any(scope in PRIVILEGED for scope in required_permissions):
+            return self._invoke_prepared_privileged(spec,agent_id,objective,inputs,
+                required_permissions=tuple(required_permissions),deadline_seconds=deadline_seconds,
+                max_steps=max_steps,idempotency_key=idempotency_key,source_refs=source_refs,
+                provider_route=provider_route,token=token,approval=approval,
+                requested_skill_ids=requested_skill_ids,parent_task_id=parent_task_id,execution_id=execution_id)
+        if execution_id is not None or approval is not None:
+            raise PermissionDenied('An execution-bound approval may only be used with its prepared privileged action.')
+        for scope in required_permissions: self.permissions.authorize(spec,scope,action_details=action_details)
+        request_hash=self._invoke_request_hash(agent_id,objective,inputs or {},required_permissions,source_refs,provider_route,requested_skill_ids,parent_task_id)
         req=TaskRequest.create(agent_id,objective,inputs=inputs or {},required_permissions=tuple(required_permissions),deadline_seconds=deadline_seconds,max_steps=max_steps,idempotency_key=idempotency_key,source_refs=tuple(source_refs),provider_route=provider_route,requested_skill_ids=requested_skill_ids,parent_task_id=parent_task_id)
         if idempotency_key:
             claim=self.store.claim_idempotency(idempotency_key,request_hash,req.task_id)

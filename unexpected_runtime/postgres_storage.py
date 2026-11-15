@@ -144,6 +144,36 @@ class PostgresStateStore(PostgresIdempotencyMixin):
                  self._dump({"objective": request.objective[:160]})),
             )
 
+    def enqueue_approved_task(self, request, execution_id: str, expected_revision: int):
+        """Atomically persist an approved task and advance its intent to enqueued."""
+        if not isinstance(execution_id,str) or not execution_id.strip():
+            raise ValueError("execution_id must be a non-empty string.")
+        if isinstance(expected_revision,bool) or not isinstance(expected_revision,int) or expected_revision<0:
+            raise ValueError("expected_revision must be a non-negative integer.")
+        payload={"task_id":request.task_id,"agent_id":request.agent_id,"objective":request.objective,
+                 "inputs":request.inputs,"required_permissions":list(request.required_permissions),
+                 "deadline_seconds":request.deadline_seconds,"max_steps":request.max_steps,
+                 "idempotency_key":request.idempotency_key,"source_refs":list(request.source_refs),
+                 "provider_route":request.provider_route,"requested_skill_ids":list(request.requested_skill_ids),
+                 "parent_task_id":request.parent_task_id,"execution_id":request.execution_id,
+                 "approval_reference":request.approval_reference,"created_at":request.created_at}
+        now=time.time()
+        with self._session() as connection:
+            self._require_approval_execution_intents_schema(connection)
+            row=connection.execute("SELECT state,revision,task_id FROM approval_execution_intents WHERE intent_id=%s FOR UPDATE",
+                                   (execution_id,)).fetchone()
+            if not row or row["state"]!="approved" or int(row["revision"])!=expected_revision or row["task_id"]!=request.task_id:
+                raise RuntimeError("Approved execution intent does not match the exact task or revision.")
+            connection.execute("INSERT INTO tasks(task_id,agent_id,status,payload_json,created_at,updated_at) VALUES(%s,%s,%s,%s,%s,%s)",
+                               (request.task_id,request.agent_id,"queued",self._dump(payload),now,now))
+            connection.execute("INSERT INTO events(ts,task_id,agent_id,event_type,payload_json) VALUES(%s,%s,%s,%s,%s)",
+                               (now,request.task_id,request.agent_id,"task_queued",self._dump({"objective":request.objective[:160],"execution_id":execution_id})))
+            updated=connection.execute("UPDATE approval_execution_intents SET state='enqueued',revision=revision+1,updated_at=%s WHERE intent_id=%s AND state='approved' AND revision=%s AND task_id=%s",
+                                       (now,execution_id,expected_revision,request.task_id))
+            if updated.rowcount!=1:
+                raise RuntimeError("Approved execution intent enqueue compare-and-set failed.")
+        return request.task_id
+
     def get_task(self, task_id: str):
         with self._session() as connection:
             row = connection.execute("SELECT * FROM tasks WHERE task_id=%s", (task_id,)).fetchone()

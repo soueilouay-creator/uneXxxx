@@ -41,6 +41,28 @@ class PermissionPolicy:
         if permission not in spec.allowed_permissions:
             raise PermissionDenied(f'Permission denied: {spec.id} is not allowed scope {permission}.')
 
+    def authorize_bound(self, spec, permission: str, approval: ApprovalContext | None,
+                        *, action_details: dict[str, Any], binding) -> None:
+        """Authorize privileged actions only through the bound, one-use host verifier."""
+        if permission not in PRIVILEGED:
+            self.authorize(spec, permission)
+            return
+        if (not isinstance(approval, ApprovalContext) or not approval.approval_id
+                or not approval.approver or permission not in approval.approved_permissions
+                or not approval.action_digest or self.approval_verifier is None
+                or action_details is None or binding is None):
+            raise PermissionDenied(f'Permission denied: {permission} requires a trusted, execution-bound host approval.')
+        verifier = getattr(self.approval_verifier, 'verify_bound', None)
+        if not callable(verifier):
+            raise PermissionDenied('Permission denied: bound host approval verification is unavailable.')
+        try:
+            expected = self.approval_digest(action_details)
+            trusted = approval.action_digest == expected and bool(verifier(approval, permission, expected, binding))
+        except Exception:
+            trusted = False
+        if not trusted:
+            raise PermissionDenied(f'Permission denied: {permission} approval is invalid, consumed, or bound elsewhere.')
+
     @staticmethod
     def capability_status() -> dict[str, str]:
         return {'provider.chat': 'available (mock by default; real adapter unconfigured)',

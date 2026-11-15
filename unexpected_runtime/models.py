@@ -27,6 +27,8 @@ class TaskRequest:
     provider_route: str | None = None
     requested_skill_ids: tuple[str, ...] = ()
     parent_task_id: str | None = None
+    execution_id: str | None = None
+    approval_reference: str | None = None
     created_at: float = field(default_factory=time.time)
 
     @classmethod

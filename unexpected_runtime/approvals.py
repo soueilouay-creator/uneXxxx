@@ -18,6 +18,26 @@ import time
 class ApprovalVerifier(Protocol):
     """Host trust boundary; implementations must authenticate the approver and approval record."""
 
+    def get_consumed_binding(self, approval_id: str) -> dict[str, Any] | None:
+        """Read back an immutable consumed approval binding without changing it."""
+        if not isinstance(approval_id, str) or not approval_id.strip():
+            return None
+        if self.ledger is not None:
+            try:
+                row=self.ledger.get_consumed_binding(approval_id)
+                return dict(row) if row is not None else None
+            except Exception:
+                return None
+        if not self.ledger_path.exists():
+            return None
+        with sqlite3.connect(self.ledger_path, timeout=5.0) as connection:
+            connection.row_factory=sqlite3.Row
+            row=connection.execute(
+                'SELECT approval_id,action_digest,permission,execution_id,task_id,workflow_id,stage_key,consumed_at '
+                'FROM approval_execution_bindings WHERE approval_id=?',(approval_id,)
+            ).fetchone()
+        return dict(row) if row else None
+
     def verify(self, approval: Any, permission: str, action_digest: str) -> bool:
         """Return true only for a trusted, unexpired approval bound to this action and permission."""
         ...

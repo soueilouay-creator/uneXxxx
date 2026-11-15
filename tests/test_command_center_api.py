@@ -352,5 +352,49 @@ class CommandCenterAPITests(unittest.TestCase):
         self.assertIn("loadTaskTrace(button.dataset.workflowTrace", js)
         self.assertIn('$("workflow-run-list").addEventListener("click"', js)
 
+    def test_approval_intent_prepare_is_authenticated_and_has_no_task_side_effect(self):
+        payload = {
+            "agent_id": "orchestrator",
+            "objective": "Prepare a protected repository operation",
+            "inputs": {"target": "fixture:release"},
+            "required_permission": "repo_write",
+        }
+        self.assertEqual(self.request("POST", "/v1/approval-intents", body=payload)[0], 401)
+        status, body = self.request("POST", "/v1/approval-intents", body=payload, token=self.token)
+        self.assertEqual(status, 201, body)
+        intent = body["intent"]
+        self.assertTrue(intent["execution_id"])
+        self.assertTrue(intent["task_id"])
+        self.assertTrue(intent["action_digest"])
+        self.assertEqual(intent["permission"], "repo_write")
+        tasks_status, tasks = self.request("GET", "/v1/tasks", token=self.token)
+        self.assertEqual(tasks_status, 200)
+        self.assertEqual(tasks["count"], 0)
+        self.assertEqual(self.coordinator.provider.calls, 0)
+
+    def test_approval_intent_prepare_rejects_unknown_fields(self):
+        payload = {
+            "agent_id": "orchestrator",
+            "objective": "Prepare a protected repository operation",
+            "required_permission": "repo_write",
+            "unexpected": "must not be ignored",
+        }
+        status, body = self.request("POST", "/v1/approval-intents", body=payload, token=self.token)
+        self.assertEqual(status, 400, body)
+
+    def test_privileged_invoke_without_a_bound_approval_is_denied(self):
+        payload = {
+            "agent_id": "orchestrator",
+            "objective": "Do not publish without approval",
+            "required_permissions": ["publish"],
+        }
+        status, body = self.request("POST", "/v1/invoke", body=payload, token=self.token)
+        self.assertEqual(status, 400, body)
+        tasks_status, tasks = self.request("GET", "/v1/tasks", token=self.token)
+        self.assertEqual(tasks_status, 200)
+        self.assertEqual(tasks["count"], 0)
+        self.assertEqual(self.coordinator.provider.calls, 0)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

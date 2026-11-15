@@ -396,7 +396,8 @@ def create_server(*, coordinator=None, api_token=None, host="127.0.0.1", port=0)
             is_creator_produce=bool(creator_match and creator_match.group(2)=="produce")
             is_creator=is_creator_project or is_creator_version or is_creator_render or is_creator_produce
             is_android_video=route=="/v1/creator/android-videos"
-            if route not in {"/v1/invoke", "/v1/lifecycle", "/v1/providers/test", "/v1/improvements/propose", "/v1/quality-evaluations", "/v1/subagents/run"} and not is_creator and not is_android_video: return self.send_json(404,{"error":"Not found."})
+            if route not in {"/v1/invoke", "/v1/approval-intents", "/v1/lifecycle", "/v1/providers/test", "/v1/improvements/propose", "/v1/quality-evaluations", "/v1/subagents/run"} and not is_creator and not is_android_video: return self.send_json(404,{"error":"Not found."})
+            is_approval_intent=route=="/v1/approval-intents"
             is_lifecycle=route=="/v1/lifecycle"
             is_provider_test=route=="/v1/providers/test"
             is_improvement_propose=route=="/v1/improvements/propose"
@@ -595,7 +596,9 @@ def create_server(*, coordinator=None, api_token=None, host="127.0.0.1", port=0)
                     return
             allowed=({"agent_id","objective","inputs","deadline_seconds","max_corrections","max_improvements","provider_route","workflow_id"}
                      if is_lifecycle else
-                     {"agent_id","objective","inputs","deadline_seconds","max_steps","idempotency_key","source_refs","provider_route","skill_ids"})
+                     ({"agent_id","objective","inputs","deadline_seconds","max_steps","idempotency_key","source_refs","provider_route","skill_ids","required_permission","workflow_id","stage_key"}
+                      if is_approval_intent else
+                      {"agent_id","objective","inputs","deadline_seconds","max_steps","idempotency_key","source_refs","provider_route","skill_ids","required_permissions","execution_id","approval"}))
             if set(body)-allowed: return self.send_json(400,{"error":"Unsupported fields; privileged actions are not exposed."})
             provider_route=body.get("provider_route")
             if provider_route is not None and not isinstance(provider_route,str): return self.send_json(400,{"error":"provider_route must be a string."})
@@ -610,6 +613,9 @@ def create_server(*, coordinator=None, api_token=None, host="127.0.0.1", port=0)
             corrections=body.get("max_corrections",1)
             improvements=body.get("max_improvements",3)
             workflow_id=body.get("workflow_id")
+            stage_key=body.get("stage_key")
+            required_permission=body.get("required_permission")
+            required_permissions=body.get("required_permissions",[])
             if not isinstance(agent,str) or not agent.strip() or not isinstance(objective,str) or not objective.strip():
                 return self.send_json(400,{"error":"agent_id and objective are required."})
             if len(objective)>MAX_OBJECTIVE_CHARS: return self.send_json(413,{"error":"Objective too large."})
@@ -641,7 +647,41 @@ def create_server(*, coordinator=None, api_token=None, host="127.0.0.1", port=0)
                         or any(not isinstance(x,str) or not x.strip() or len(x)>128 for x in skill_ids)
                         or len(set(skill_ids))!=len(skill_ids)):
                     return self.send_json(400,{"error":"skill_ids must be a list of at most 4 unique non-empty skill IDs."})
+                if is_approval_intent:
+                    if not isinstance(required_permission,str) or not required_permission.strip():
+                        return self.send_json(400,{"error":"required_permission is required."})
+                    if (workflow_id is None)!=(stage_key is None):
+                        return self.send_json(400,{"error":"workflow_id and stage_key must be supplied together."})
+                    if workflow_id is not None and (not isinstance(workflow_id,str) or not workflow_id.strip() or len(workflow_id)>128
+                                                    or not isinstance(stage_key,str) or not stage_key.strip() or len(stage_key)>128):
+                        return self.send_json(400,{"error":"Invalid workflow or stage identity."})
+                else:
+                    if not isinstance(required_permissions,list) or len(required_permissions)>1 or any(not isinstance(x,str) or not x for x in required_permissions):
+                        return self.send_json(400,{"error":"required_permissions must contain at most one scope."})
+                    if body.get("execution_id") is not None and (not isinstance(body.get("execution_id"),str) or not body["execution_id"].strip()):
+                        return self.send_json(400,{"error":"execution_id must be a non-empty string."})
+                    if body.get("approval") is not None:
+                        approval=body["approval"]
+                        fields={"approval_id","approver","approved_permissions","rationale","created_at","action_digest"}
+                        required={"approval_id","approver","approved_permissions","rationale","action_digest"}
+                        if (not isinstance(approval,dict) or set(approval)-fields or not required.issubset(approval)
+                                or any(not isinstance(approval.get(k),str) or not approval[k].strip()
+                                       for k in ("approval_id","approver","rationale","action_digest"))
+                                or not isinstance(approval.get("approved_permissions"),list)
+                                or len(approval["approved_permissions"])>8
+                                or any(not isinstance(x,str) or not x for x in approval["approved_permissions"])):
+                            return self.send_json(400,{"error":"Invalid structured approval object."})
+                        created_at=approval.get("created_at")
+                        if created_at is not None and (isinstance(created_at,bool) or not isinstance(created_at,(int,float)) or not math.isfinite(float(created_at))):
+                            return self.send_json(400,{"error":"approval.created_at must be a finite timestamp."})
             try:
+                if is_approval_intent:
+                    intent=active.prepare_invoke(
+                        agent.strip(),objective,inputs,required_permission=required_permission,
+                        deadline_seconds=float(deadline),max_steps=steps,idempotency_key=idem,
+                        source_refs=tuple(refs),provider_route=provider_route,
+                        requested_skill_ids=tuple(skill_ids),workflow_id=workflow_id,stage_key=stage_key)
+                    return self.send_json(201,{"intent":intent})
                 if is_lifecycle:
                     provider_router = getattr(active, "provider", None)
                     selected_provider = (
@@ -676,10 +716,21 @@ def create_server(*, coordinator=None, api_token=None, host="127.0.0.1", port=0)
                         lifecycle_slots.release()
                     success=result.get("status")=="delivered" and result.get("delivered") is True
                 else:
+                    approval_context=None
+                    if body.get("approval") is not None:
+                        from .models import ApprovalContext
+                        data=body["approval"]
+                        kwargs={"approval_id":data["approval_id"],"approver":data["approver"],
+                                "approved_permissions":frozenset(data["approved_permissions"]),
+                                "rationale":data["rationale"],"action_digest":data["action_digest"]}
+                        if data.get("created_at") is not None:
+                            kwargs["created_at"]=float(data["created_at"])
+                        approval_context=ApprovalContext(**kwargs)
                     result=active.invoke(agent.strip(),objective,inputs,deadline_seconds=float(deadline),
                                          max_steps=steps,idempotency_key=idem,source_refs=tuple(refs),
-                                         provider_route=provider_route,
-                                         requested_skill_ids=tuple(skill_ids)).to_dict()
+                                         provider_route=provider_route,requested_skill_ids=tuple(skill_ids),
+                                         required_permissions=tuple(required_permissions),execution_id=body.get("execution_id"),
+                                         approval=approval_context).to_dict()
                     success=result.get("status")=="completed"
                 return self.send_json(200 if success else 502,{"result":result})
             except Exception as exc: return self.send_json(400,{"error":f"Task rejected or failed ({type(exc).__name__})."})

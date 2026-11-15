@@ -96,6 +96,18 @@ jobs:
               raise SystemExit('action_details_json must be a valid finite JSON object') from exc
           if permission not in action_details.get('required_permissions', []):
               raise SystemExit('action_details_json must include the requested permission in required_permissions')
+          binding = action_details.get('execution_binding')
+          if not isinstance(binding, dict) or set(binding) != {'execution_id', 'task_id', 'workflow_id', 'stage_key'}:
+              raise SystemExit('action_details_json must include an exact execution_binding object')
+          for field in ('execution_id', 'task_id'):
+              if not isinstance(binding.get(field), str) or not binding[field].strip() or len(binding[field]) > 128:
+                  raise SystemExit('execution_binding requires non-empty execution_id and task_id')
+          if (binding.get('workflow_id') is None) != (binding.get('stage_key') is None):
+              raise SystemExit('execution_binding workflow_id and stage_key must be supplied together')
+          for field in ('workflow_id', 'stage_key'):
+              value = binding.get(field)
+              if value is not None and (not isinstance(value, str) or not value.strip() or len(value) > 128):
+                  raise SystemExit('execution_binding workflow_id and stage_key must be valid strings')
           if hashlib.sha256(canonical).hexdigest() != digest:
               raise SystemExit('action_digest does not match action_details_json')
           if not summary or len(summary) > 1000:

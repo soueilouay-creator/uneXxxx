@@ -12,6 +12,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class TestHostApprovalVerifier:
+    def __init__(self):
+        self.bindings = {}
+
     def verify(self, approval, permission, action_digest):
         return (approval.approval_id == 'host-issued-approval-1'
                 and approval.approver == 'verified-host-user'
@@ -19,7 +22,16 @@ class TestHostApprovalVerifier:
                 and permission in approval.approved_permissions)
 
     def verify_bound(self, approval, permission, action_digest, binding):
-        return isinstance(binding, ApprovalExecutionBinding) and self.verify(approval, permission, action_digest)
+        if not isinstance(binding, ApprovalExecutionBinding) or not self.verify(approval, permission, action_digest):
+            return False
+        self.bindings[approval.approval_id] = {
+            "approval_id": approval.approval_id, "action_digest": action_digest,
+            "permission": permission, **binding.to_dict(), "consumed_at": 1.0,
+        }
+        return True
+
+    def get_consumed_binding(self, approval_id):
+        return self.bindings.get(approval_id)
 
 
 def make_approval(policy, permission, action_details, *, approval_id='host-issued-approval-1',

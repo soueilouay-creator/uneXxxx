@@ -330,6 +330,105 @@ class PostgresStateStore(PostgresIdempotencyMixin):
             ).fetchall()
         return [self._decode_workflow_stage(row) for row in rows]
 
+    @staticmethod
+    def _validate_approval_execution_intent_values(intent_id, task_id, request_hash,
+                                                   action_digest, permission, workflow_id, stage_key):
+        for field, value in (("intent_id", intent_id), ("task_id", task_id), ("permission", permission)):
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"{field} must be a non-empty string.")
+        PostgresStateStore._validate_workflow_hash(request_hash, "request_hash")
+        PostgresStateStore._validate_workflow_hash(action_digest, "action_digest")
+        if (workflow_id is None) != (stage_key is None):
+            raise ValueError("workflow_id and stage_key must be supplied together.")
+        for field, value in (("workflow_id", workflow_id), ("stage_key", stage_key)):
+            if value is not None and (not isinstance(value, str) or not value.strip()):
+                raise ValueError(f"{field} must be a non-empty string when supplied.")
+
+    _APPROVAL_INTENT_TRANSITIONS = {
+        "prepared": {"awaiting_approval", "blocked"},
+        "awaiting_approval": {"approved", "rejected", "blocked"},
+        "approved": {"enqueued", "blocked"},
+        "enqueued": {"completed", "failed", "blocked"},
+        "rejected": set(), "completed": set(), "failed": set(), "blocked": set(),
+    }
+
+    @staticmethod
+    def _require_approval_execution_intents_schema(connection):
+        row = connection.execute(
+            "SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1"
+        ).fetchone()
+        if not row or int(row["version"]) < 5:
+            raise PostgresStorageError(
+                "PostgreSQL approval execution intents require additive migration 005."
+            )
+
+    def create_approval_execution_intent(self, intent_id: str, task_id: str,
+                                         request_hash: str, action_digest: str,
+                                         permission: str, workflow_id: str | None = None,
+                                         stage_key: str | None = None):
+        self._validate_approval_execution_intent_values(
+            intent_id, task_id, request_hash, action_digest, permission, workflow_id, stage_key
+        )
+        now = time.time()
+        identity = {
+            "intent_id": intent_id, "task_id": task_id, "request_hash": request_hash,
+            "action_digest": action_digest, "permission": permission,
+            "workflow_id": workflow_id, "stage_key": stage_key,
+        }
+        with self._session() as connection:
+            self._require_approval_execution_intents_schema(connection)
+            connection.execute(
+                "INSERT INTO approval_execution_intents("
+                "intent_id,task_id,request_hash,action_digest,permission,workflow_id,stage_key,"
+                "state,revision,created_at,updated_at) "
+                "VALUES(%s,%s,%s,%s,%s,%s,%s,'prepared',0,%s,%s) ON CONFLICT DO NOTHING",
+                (intent_id, task_id, request_hash, action_digest, permission, workflow_id, stage_key, now, now),
+            )
+            row = connection.execute(
+                "SELECT * FROM approval_execution_intents WHERE intent_id=%s", (intent_id,)
+            ).fetchone()
+            if row is None:
+                owner = connection.execute(
+                    "SELECT intent_id FROM approval_execution_intents WHERE task_id=%s", (task_id,)
+                ).fetchone()
+                if owner:
+                    raise ValueError("task_id is already owned by another approval execution intent.")
+                raise RuntimeError("Approval execution intent was not persisted.")
+            item = dict(row)
+            if any(item[field] != value for field, value in identity.items()):
+                raise ValueError("Approval execution intent ID is already bound to a different identity.")
+            return item
+
+    def get_approval_execution_intent(self, intent_id: str):
+        if not isinstance(intent_id, str) or not intent_id.strip():
+            raise ValueError("intent_id must be a non-empty string.")
+        with self._session() as connection:
+            self._require_approval_execution_intents_schema(connection)
+            row = connection.execute(
+                "SELECT * FROM approval_execution_intents WHERE intent_id=%s", (intent_id,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def transition_approval_execution_intent(self, intent_id: str, expected_state: str,
+                                             next_state: str, expected_revision: int) -> bool:
+        if not isinstance(intent_id, str) or not intent_id.strip():
+            raise ValueError("intent_id must be a non-empty string.")
+        if (isinstance(expected_revision, bool) or not isinstance(expected_revision, int)
+                or expected_revision < 0):
+            raise ValueError("expected_revision must be a non-negative integer.")
+        if expected_state not in self._APPROVAL_INTENT_TRANSITIONS:
+            raise ValueError("expected_state is not a supported approval execution intent state.")
+        if next_state not in self._APPROVAL_INTENT_TRANSITIONS[expected_state]:
+            raise ValueError(f"Illegal approval execution intent transition: {expected_state} -> {next_state}.")
+        with self._session() as connection:
+            self._require_approval_execution_intents_schema(connection)
+            cursor = connection.execute(
+                "UPDATE approval_execution_intents SET state=%s,revision=revision+1,updated_at=%s "
+                "WHERE intent_id=%s AND state=%s AND revision=%s",
+                (next_state, time.time(), intent_id, expected_state, expected_revision),
+            )
+        return cursor.rowcount == 1
+
     def set_memory(self, agent_id: str, key: str, value: Any):
         with self._session() as connection:
             connection.execute(

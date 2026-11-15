@@ -51,6 +51,24 @@ class StateStore:
             );
             CREATE INDEX IF NOT EXISTS idx_workflow_stage_checkpoints_status_updated
                 ON workflow_stage_checkpoints(status,updated_at);
+            CREATE TABLE IF NOT EXISTS approval_execution_intents(
+                intent_id TEXT PRIMARY KEY,
+                task_id TEXT NOT NULL UNIQUE,
+                request_hash TEXT NOT NULL CHECK(length(request_hash)=64 AND request_hash NOT GLOB '*[^0-9a-f]*'),
+                action_digest TEXT NOT NULL CHECK(length(action_digest)=64 AND action_digest NOT GLOB '*[^0-9a-f]*'),
+                permission TEXT NOT NULL CHECK(length(trim(permission))>0),
+                workflow_id TEXT,
+                stage_key TEXT,
+                state TEXT NOT NULL CHECK(state IN ('prepared','awaiting_approval','approved','rejected','enqueued','completed','failed','blocked')),
+                revision INTEGER NOT NULL DEFAULT 0 CHECK(revision>=0),
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL,
+                CHECK((workflow_id IS NULL)=(stage_key IS NULL)),
+                CHECK(workflow_id IS NULL OR length(trim(workflow_id))>0),
+                CHECK(stage_key IS NULL OR length(trim(stage_key))>0)
+            );
+            CREATE INDEX IF NOT EXISTS idx_approval_execution_intents_state_updated
+                ON approval_execution_intents(state,updated_at);
 
             CREATE INDEX IF NOT EXISTS idx_idempotency_claims_state_updated ON idempotency_claims(state,updated_at);
             CREATE TABLE IF NOT EXISTS outcomes(outcome_id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, task_id TEXT, success INTEGER NOT NULL, feedback TEXT NOT NULL, provenance_json TEXT NOT NULL, created_at REAL NOT NULL);
@@ -296,6 +314,92 @@ class StateStore:
                 (workflow_id,),
             ).fetchall()
         return [self._decode_workflow_stage(row) for row in rows]
+
+    @staticmethod
+    def _validate_approval_execution_intent_values(intent_id, task_id, request_hash,
+                                                   action_digest, permission, workflow_id, stage_key):
+        for field, value in (("intent_id", intent_id), ("task_id", task_id), ("permission", permission)):
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"{field} must be a non-empty string.")
+        StateStore._validate_workflow_hash(request_hash, "request_hash")
+        StateStore._validate_workflow_hash(action_digest, "action_digest")
+        if (workflow_id is None) != (stage_key is None):
+            raise ValueError("workflow_id and stage_key must be supplied together.")
+        for field, value in (("workflow_id", workflow_id), ("stage_key", stage_key)):
+            if value is not None and (not isinstance(value, str) or not value.strip()):
+                raise ValueError(f"{field} must be a non-empty string when supplied.")
+
+    _APPROVAL_INTENT_TRANSITIONS = {
+        "prepared": {"awaiting_approval", "blocked"},
+        "awaiting_approval": {"approved", "rejected", "blocked"},
+        "approved": {"enqueued", "blocked"},
+        "enqueued": {"completed", "failed", "blocked"},
+        "rejected": set(), "completed": set(), "failed": set(), "blocked": set(),
+    }
+
+    def create_approval_execution_intent(self, intent_id: str, task_id: str,
+                                         request_hash: str, action_digest: str,
+                                         permission: str, workflow_id: str | None = None,
+                                         stage_key: str | None = None):
+        self._validate_approval_execution_intent_values(
+            intent_id, task_id, request_hash, action_digest, permission, workflow_id, stage_key
+        )
+        now = time.time()
+        identity = {
+            "intent_id": intent_id, "task_id": task_id, "request_hash": request_hash,
+            "action_digest": action_digest, "permission": permission,
+            "workflow_id": workflow_id, "stage_key": stage_key,
+        }
+        with self._session() as c:
+            c.execute(
+                "INSERT INTO approval_execution_intents("
+                "intent_id,task_id,request_hash,action_digest,permission,workflow_id,stage_key,"
+                "state,revision,created_at,updated_at) "
+                "VALUES(?,?,?,?,?,?,?,'prepared',0,?,?) ON CONFLICT DO NOTHING",
+                (intent_id, task_id, request_hash, action_digest, permission, workflow_id, stage_key, now, now),
+            )
+            row = c.execute(
+                "SELECT * FROM approval_execution_intents WHERE intent_id=?", (intent_id,)
+            ).fetchone()
+            if row is None:
+                owner = c.execute(
+                    "SELECT intent_id FROM approval_execution_intents WHERE task_id=?", (task_id,)
+                ).fetchone()
+                if owner:
+                    raise ValueError("task_id is already owned by another approval execution intent.")
+                raise RuntimeError("Approval execution intent was not persisted.")
+            item = dict(row)
+            if any(item[field] != value for field, value in identity.items()):
+                raise ValueError("Approval execution intent ID is already bound to a different identity.")
+            return item
+
+    def get_approval_execution_intent(self, intent_id: str):
+        if not isinstance(intent_id, str) or not intent_id.strip():
+            raise ValueError("intent_id must be a non-empty string.")
+        with self._session() as c:
+            row = c.execute(
+                "SELECT * FROM approval_execution_intents WHERE intent_id=?", (intent_id,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def transition_approval_execution_intent(self, intent_id: str, expected_state: str,
+                                             next_state: str, expected_revision: int) -> bool:
+        if not isinstance(intent_id, str) or not intent_id.strip():
+            raise ValueError("intent_id must be a non-empty string.")
+        if (isinstance(expected_revision, bool) or not isinstance(expected_revision, int)
+                or expected_revision < 0):
+            raise ValueError("expected_revision must be a non-negative integer.")
+        if expected_state not in self._APPROVAL_INTENT_TRANSITIONS:
+            raise ValueError("expected_state is not a supported approval execution intent state.")
+        if next_state not in self._APPROVAL_INTENT_TRANSITIONS[expected_state]:
+            raise ValueError(f"Illegal approval execution intent transition: {expected_state} -> {next_state}.")
+        with self._session() as c:
+            cursor = c.execute(
+                "UPDATE approval_execution_intents SET state=?,revision=revision+1,updated_at=? "
+                "WHERE intent_id=? AND state=? AND revision=?",
+                (next_state, time.time(), intent_id, expected_state, expected_revision),
+            )
+        return cursor.rowcount == 1
 
     def set_memory(self,agent_id:str,key:str,value:Any):
         with self._session() as c: c.execute('INSERT INTO agent_memory(agent_id,key,value_json,updated_at) VALUES(?,?,?,?) ON CONFLICT(agent_id,key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at',(agent_id,key,json.dumps(value,ensure_ascii=False),time.time()))

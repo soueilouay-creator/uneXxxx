@@ -124,3 +124,16 @@ This file is append-only. Each entry records one bounded engineering increment a
 - **Renderer result:** `Ran 2 tests in 26.730s`; `OK`. The immutable rendering worker built and both renderer end-to-end tests passed.
 - **Interpretation:** the next implementation step is now safe to begin: add the execution-intent persistence contract to SQLite and PostgreSQL with migration 005, preserving the existing tables and rows. No approval consumption or coordinator wiring is included in that first storage increment.
 - **Preservation and cost:** compare remains 27 commits ahead / 0 behind with no removed paths. No production migration, database write, deployment, provider call, package addition or paid infrastructure was performed; GitHub Actions billing impact is not visible.
+
+
+## Run 11 — 2026-11-15 — Approval execution intent storage and migration 005
+
+- **Phase:** Phase 3, durable execution; approval-binding Task 1.
+- **Baseline and rollback:** rechecked default branch `main` at `d04b651774b7699f3430dc36972c2de74c587839`; resumed open draft PR #16 on `upgrade/v8-workflow-checkpoint-ledger-20261111` at `64ec5023ed63b599d88d8b5587da2fe346fb829a`. This parent commit remains the rollback point; no history rewrite or main-branch write.
+- **Implementation:** added additive PostgreSQL migration `migrations/005_approval_execution_intents.sql`; added additive SQLite table/index initialization; implemented create/read/idempotent identity checks and state/revision compare-and-swap transitions in both `unexpected_runtime/storage.py` and `unexpected_runtime/postgres_storage.py`.
+- **State safety:** one intent per task; request/action SHA-256 validation; workflow/stage pairing; immutable identity on repeated create; explicit legal transition graph; terminal states cannot be reopened; stale revisions and duplicate concurrent transitions return false; PostgreSQL methods require schema version 5 and never create/repair production tables.
+- **Preservation tests:** expanded `tests/test_approval_execution_intents.py` to verify old task/event/memory records remain readable after intent operations and after opening a pre-existing SQLite database. CI now seeds pre-005 PostgreSQL task/event/memory rows, applies migration 005, and reads them back before running the runtime suite.
+- **Verification status:** implementation commit CI pending. The TDD red signal is recorded in CI run [43669717326](https://github.com/soueilouay-creator/uneXxxx/actions/runs/43669717326): 405 tests, 16 expected missing-method errors, 3 skipped; renderer E2E 2/2 passed. The focused failure was the absent storage methods, after the earlier test-helper TypeError had been fixed.
+- **Preservation:** source branch and all pre-existing repository paths remain intact; no production database, Neon branch, Render service, deployment, provider, credential, existing user record, PWA or source archive was changed. CI uses an ephemeral PostgreSQL service only.
+- **Costs:** no dependency, external service, provider call, paid API, infrastructure or production migration added. GitHub Actions account-level billing remains unobservable.
+- **Next:** observe the full CI run; repair only evidence-backed failures; then append exact tested SHA, command, counts and job outcomes to this log.

@@ -116,17 +116,58 @@ jobs:
           python -m json.tool unexpected_runtime/data/resource_catalog.json >/dev/null
           python -m json.tool unexpected_runtime/data/quality_scenarios.json >/dev/null
           python -m unexpected_runtime.cli resources --validate
-      - name: Apply PostgreSQL migrations to ephemeral CI database
+      - name: Apply PostgreSQL migrations and verify additive preservation
         run: |
           python - <<'PY'
           import os
           from pathlib import Path
           import psycopg
+
           dsn = os.environ["TEST_POSTGRES_DSN"]
+          migrations = sorted(Path("migrations").glob("*.sql"))
+          before_005 = [path for path in migrations if int(path.name[:3]) < 5]
+          from_005 = [path for path in migrations if int(path.name[:3]) >= 5]
           with psycopg.connect(dsn, autocommit=True) as connection:
-              for migration in sorted(Path("migrations").glob("*.sql")):
+              for migration in before_005:
                   connection.execute(migration.read_text(encoding="utf-8"), prepare=False)
                   print(f"Applied {migration}")
+
+              # Seed records using the pre-005 schema, then prove migration 005 leaves them intact.
+              connection.execute(
+                  "INSERT INTO tasks(task_id,agent_id,status,payload_json,result_json,created_at,updated_at) "
+                  "VALUES(%s,%s,%s,%s,%s,%s,%s)",
+                  ("v8-migration-005-preservation", "ci", "completed",
+                   '{"preserved":true}', '{"result":"legacy"}', 1.0, 2.0),
+              )
+              connection.execute(
+                  "INSERT INTO events(ts,task_id,agent_id,event_type,payload_json) VALUES(%s,%s,%s,%s,%s)",
+                  (3.0, "v8-migration-005-preservation", "ci", "migration_preservation", '{"kept":true}'),
+              )
+              connection.execute(
+                  "INSERT INTO agent_memory(agent_id,key,value_json,updated_at) VALUES(%s,%s,%s,%s)",
+                  ("ci", "v8-migration-005-preservation", '{"memory":"kept"}', 4.0),
+              )
+
+              for migration in from_005:
+                  connection.execute(migration.read_text(encoding="utf-8"), prepare=False)
+                  print(f"Applied {migration}")
+
+              task = connection.execute(
+                  "SELECT payload_json,result_json FROM tasks WHERE task_id=%s",
+                  ("v8-migration-005-preservation",),
+              ).fetchone()
+              event = connection.execute(
+                  "SELECT event_type,payload_json FROM events WHERE task_id=%s ORDER BY event_id DESC LIMIT 1",
+                  ("v8-migration-005-preservation",),
+              ).fetchone()
+              memory = connection.execute(
+                  "SELECT value_json FROM agent_memory WHERE agent_id=%s AND key=%s",
+                  ("ci", "v8-migration-005-preservation"),
+              ).fetchone()
+              assert task == ('{"preserved":true}', '{"result":"legacy"}'), task
+              assert event == ("migration_preservation", '{"kept":true}'), event
+              assert memory == ('{"memory":"kept"}',), memory
+              print("Verified pre-005 task, event and memory rows remain readable.")
           PY
       - name: Build v8 source integrity fixture
         run: |

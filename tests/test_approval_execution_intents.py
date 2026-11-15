@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 import tempfile
 import unittest
 import uuid
@@ -9,6 +10,7 @@ from pathlib import Path
 
 from unexpected_runtime.postgres_storage import PostgresStateStore
 from unexpected_runtime.storage import StateStore
+from unexpected_runtime.models import TaskRequest
 
 
 def intent_values(*, intent_id=None, task_id=None, request_hash="a" * 64, action_digest="b" * 64, permission="repo_write", workflow_id=None, stage_key=None):
@@ -41,6 +43,37 @@ class ApprovalExecutionIntentStoreContract:
         self.assertEqual(created["revision"], 0)
         reopened = self.reopen_store()
         self.assertEqual(reopened.get_approval_execution_intent(values["intent_id"]), created)
+
+
+    def test_intent_operations_preserve_existing_task_event_and_memory_records(self):
+        request = TaskRequest.create(
+            "orchestrator", "Preserve existing state during approval intent storage",
+            inputs={"preservation_fixture": True},
+        )
+        self.store.enqueue(request)
+        self.store.set_memory("orchestrator", "approval-intent-preservation", {"keep": "memory"})
+        self.store.log_event(
+            "approval_intent_preservation", request.task_id, "orchestrator", {"keep": "event"}
+        )
+        before_task = self.store.get_task(request.task_id)
+        before_events = self.store.list_task_events(request.task_id, limit=20)
+        before_memory = self.store.get_memory("orchestrator", "approval-intent-preservation")
+
+        created = self.create()
+        self.assertEqual(created["state"], "prepared")
+        self.assertTrue(self.store.transition_approval_execution_intent(
+            created["intent_id"], "prepared", "awaiting_approval", 0
+        ))
+
+        reopened = self.reopen_store()
+        self.assertEqual(reopened.get_task(request.task_id), before_task)
+        self.assertEqual(reopened.list_task_events(request.task_id, limit=20), before_events)
+        self.assertEqual(
+            reopened.get_memory("orchestrator", "approval-intent-preservation"), before_memory
+        )
+        self.assertEqual(
+            reopened.get_approval_execution_intent(created["intent_id"])["state"], "awaiting_approval"
+        )
 
     def test_identical_create_is_idempotent_and_does_not_reset_state(self):
         values = intent_values()
@@ -143,6 +176,50 @@ class SQLiteApprovalExecutionIntentTests(unittest.TestCase, ApprovalExecutionInt
 
     def reopen_store(self):
         return StateStore(self.database_path)
+
+
+    def test_opening_legacy_sqlite_database_adds_intent_table_without_rewriting_rows(self):
+        legacy_path = Path(self.directory.name) / "legacy.sqlite3"
+        with sqlite3.connect(legacy_path) as connection:
+            connection.executescript("""
+                CREATE TABLE tasks(
+                    task_id TEXT PRIMARY KEY,agent_id TEXT NOT NULL,status TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,result_json TEXT,created_at REAL NOT NULL,updated_at REAL NOT NULL
+                );
+                CREATE TABLE events(
+                    event_id INTEGER PRIMARY KEY AUTOINCREMENT,ts REAL NOT NULL,task_id TEXT,
+                    agent_id TEXT,event_type TEXT NOT NULL,payload_json TEXT NOT NULL
+                );
+                CREATE TABLE agent_memory(
+                    agent_id TEXT NOT NULL,key TEXT NOT NULL,value_json TEXT NOT NULL,
+                    updated_at REAL NOT NULL,PRIMARY KEY(agent_id,key)
+                );
+            """)
+            connection.execute(
+                "INSERT INTO tasks VALUES(?,?,?,?,?,?,?)",
+                ("legacy-task", "orchestrator", "completed", '{"legacy":true}', '{"ok":true}', 10.0, 11.0),
+            )
+            connection.execute(
+                "INSERT INTO events(ts,task_id,agent_id,event_type,payload_json) VALUES(?,?,?,?,?)",
+                (12.0, "legacy-task", "orchestrator", "legacy_event", '{"retained":true}'),
+            )
+            connection.execute(
+                "INSERT INTO agent_memory VALUES(?,?,?,?)",
+                ("orchestrator", "legacy-memory", '{"retained":"yes"}', 13.0),
+            )
+
+        upgraded = StateStore(legacy_path)
+        original_task = upgraded.get_task("legacy-task")
+        original_events = upgraded.list_task_events("legacy-task", limit=20)
+        original_memory = upgraded.get_memory("orchestrator", "legacy-memory")
+        values = intent_values(intent_id="legacy-intent", task_id="legacy-intent-task")
+        intent = upgraded.create_approval_execution_intent(**values)
+
+        reopened = StateStore(legacy_path)
+        self.assertEqual(reopened.get_task("legacy-task"), original_task)
+        self.assertEqual(reopened.list_task_events("legacy-task", limit=20), original_events)
+        self.assertEqual(reopened.get_memory("orchestrator", "legacy-memory"), original_memory)
+        self.assertEqual(reopened.get_approval_execution_intent("legacy-intent"), intent)
 
 
 POSTGRES_DSN = os.getenv("TEST_POSTGRES_DSN")

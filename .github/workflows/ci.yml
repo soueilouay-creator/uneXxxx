@@ -126,13 +126,17 @@ jobs:
           dsn = os.environ["TEST_POSTGRES_DSN"]
           migrations = sorted(Path("migrations").glob("*.sql"))
           before_005 = [path for path in migrations if int(path.name[:3]) < 5]
-          from_005 = [path for path in migrations if int(path.name[:3]) >= 5]
+          migration_005 = [path for path in migrations if int(path.name[:3]) == 5]
+          migrations_006_plus = [path for path in migrations if int(path.name[:3]) >= 6]
+          legacy_approval = "ci-legacy-unbound-approval"
+          legacy_digest = "e" * 64
+
           with psycopg.connect(dsn, autocommit=True) as connection:
               for migration in before_005:
                   connection.execute(migration.read_text(encoding="utf-8"), prepare=False)
                   print(f"Applied {migration}")
 
-              # Seed records using the pre-005 schema, then prove migration 005 leaves them intact.
+              # Seed old application rows before migration 005.
               connection.execute(
                   "INSERT INTO tasks(task_id,agent_id,status,payload_json,result_json,created_at,updated_at) "
                   "VALUES(%s,%s,%s,%s,%s,%s,%s)",
@@ -148,7 +152,16 @@ jobs:
                   ("ci", "v8-migration-005-preservation", '{"memory":"kept"}', 4.0),
               )
 
-              for migration in from_005:
+              for migration in migration_005:
+                  connection.execute(migration.read_text(encoding="utf-8"), prepare=False)
+                  print(f"Applied {migration}")
+
+              # This approval was already consumed under the legacy schema before migration 006.
+              connection.execute(
+                  "INSERT INTO consumed_approvals(approval_id,action_digest,consumed_at) VALUES(%s,%s,%s)",
+                  (legacy_approval, legacy_digest, 5.0),
+              )
+              for migration in migrations_006_plus:
                   connection.execute(migration.read_text(encoding="utf-8"), prepare=False)
                   print(f"Applied {migration}")
 
@@ -164,10 +177,20 @@ jobs:
                   "SELECT value_json FROM agent_memory WHERE agent_id=%s AND key=%s",
                   ("ci", "v8-migration-005-preservation"),
               ).fetchone()
+              legacy = connection.execute(
+                  "SELECT action_digest,consumed_at FROM consumed_approvals WHERE approval_id=%s",
+                  (legacy_approval,),
+              ).fetchone()
+              legacy_binding = connection.execute(
+                  "SELECT approval_id FROM approval_execution_bindings WHERE approval_id=%s",
+                  (legacy_approval,),
+              ).fetchone()
               assert task == ('{"preserved":true}', '{"result":"legacy"}'), task
               assert event == ("migration_preservation", '{"kept":true}'), event
               assert memory == ('{"memory":"kept"}',), memory
-              print("Verified pre-005 task, event and memory rows remain readable.")
+              assert legacy == (legacy_digest, 5.0), legacy
+              assert legacy_binding is None, legacy_binding
+              print("Verified task/event/memory preservation and retained legacy unbound approval.")
           PY
       - name: Build v8 source integrity fixture
         run: |

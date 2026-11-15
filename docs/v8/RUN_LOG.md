@@ -181,3 +181,17 @@ This file is append-only. Each entry records one bounded engineering increment a
 - **Verification:** focused tests and resulting red CI are pending; the previous full CI green on Task 1 is historical evidence, not a pass for the new tests.
 - **Next:** confirm the new contract fails only for absent bound methods, then add migration 006 and same-transaction SQLite/PostgreSQL bound consumption plus lookup; no coordinator/HTTP wiring until Task 3.
 - **Costs/preservation:** no new dependencies, provider/API calls, paid infrastructure, deployment or production migration. GitHub Actions account-level billing is not visible.
+
+
+## Run 14 — 2026-11-15 — Atomic bound approval consumption and lookup
+
+- **Phase:** Phase 3, durable execution; approval-binding Task 2.
+- **Baseline and rollback:** Task 2 red contract is on `1ce74b0214ea1711fe61bee9a9889ec8c5c356c1`; this commit is the rollback point. Work remains on the existing draft PR #16 branch. No force push, merge or main-branch change.
+- **Implementation:** added additive PostgreSQL migration `migrations/006_approval_execution_bindings.sql`; SQLite now creates the matching binding table additively in the existing approval-ledger database. Added `consume_once_bound` and `get_consumed_binding` to the PostgreSQL ledger and corresponding SQLite verifier paths; added `verify_bound` while retaining legacy `verify` and `consume_once`.
+- **Binding checks:** immutable execution ID, task ID and optional workflow/stage tuple must exactly match the execution-binding object embedded in the immutable approval request's `action_details`; the entire action digest must still match. Unique execution/task ownership and single-use approval ID are enforced by database uniqueness constraints.
+- **Atomicity:** PostgreSQL inserts `consumed_approvals` and its binding on one connection/transaction. If the binding insert conflicts or fails, the preceding consumed-approval insert is rolled back. SQLite uses `BEGIN IMMEDIATE` and the same all-or-nothing semantics in the existing approval-ledger file. Legacy unbound approval rows are neither updated nor backfilled.
+- **CI preservation:** updated the ephemeral PostgreSQL migration rehearsal to seed a legacy consumed approval after migration 005 and before migration 006, then verify the row remains and no binding row is synthesized.
+- **Safety boundary:** this remains Task 2 only. Coordinator invocation, HTTP prepare/authorize flow and workflow pause/resume are not wired yet. No production approval, production database, deployment, provider or customer-facing action was touched.
+- **Verification:** CI for the implementation commit is pending. The Task 2 test-first run [43699560139](https://github.com/soueilouay-creator/uneXxxx/actions/runs/43699560139) is still in progress at the time of this commit; its eventual red/green outcome will be recorded separately, not inferred.
+- **Next:** inspect the test-first run's failure reasons, then run focused verifier/ledger tests and the complete CI suite on this implementation head. Fix only concrete failures. Do not begin Task 3 until Task 2 is green.
+- **Costs/preservation:** no new dependency, paid service, provider call, API credit, production migration or deployment. The PostgreSQL migration rehearsal remains ephemeral CI only; GitHub Actions billing impact is not visible.

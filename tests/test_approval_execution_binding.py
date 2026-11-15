@@ -113,8 +113,9 @@ class ApprovalExecutionBindingSQLiteTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             verifier = self.make_verifier(directory, fixture)
             self.assertTrue(verifier.verify_bound(approval(digest), "repo_write", digest, binding))
+            row = verifier.get_consumed_binding(f"github-pr:{PR_NUMBER}:proposal-001")
             self.assertEqual(
-                verifier.get_consumed_binding(f"github-pr:{PR_NUMBER}:proposal-001"),
+                {key: value for key, value in row.items() if key != "consumed_at"},
                 {
                     "approval_id": f"github-pr:{PR_NUMBER}:proposal-001",
                     "action_digest": digest,
@@ -122,6 +123,7 @@ class ApprovalExecutionBindingSQLiteTests(unittest.TestCase):
                     **binding.to_dict(),
                 },
             )
+            self.assertIsInstance(row["consumed_at"], float)
 
     def test_one_approval_cannot_be_rebound_to_another_execution_or_task(self):
         binding = ApprovalExecutionBinding("exec-A", "task-A")

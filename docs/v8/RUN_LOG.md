@@ -114,3 +114,13 @@ This file is append-only. Each entry records one bounded engineering increment a
 - **Preservation:** no tracked path was removed; no existing task, event, memory, approval, user record, production database, Neon branch, Render service, deployment, PWA, source archive, setting or secret was accessed or changed.
 - **Costs:** no new package, provider/API call, generation credit, paid infrastructure, migration or deployment. GitHub Actions account-level billing is not visible.
 - **Next:** verify the corrected red suite, then implement the smallest additive SQLite/PostgreSQL execution-intent storage contract and migration 005.
+
+
+### Run 10 CI verification — 2026-11-15
+
+- **Tested commit:** `95a01c407c859ad9b3977dd9c7951d13f6e54e44`.
+- **CI:** [run 43669717326](https://github.com/soueilouay-creator/uneXxxx/actions/runs/43669717326) completed with an expected red runtime job and a green renderer E2E job.
+- **Runtime result:** `Ran 405 tests`; `FAILED (errors=16, skipped=3)`. All 16 errors are now the expected `AttributeError: ... has no attribute 'create_approval_execution_intent'` in the not-yet-implemented SQLite/PostgreSQL storage contract. The earlier helper `TypeError` is gone. This establishes a clean test-first failure signal; it is not a passing release suite.
+- **Renderer result:** `Ran 2 tests in 26.730s`; `OK`. The immutable rendering worker built and both renderer end-to-end tests passed.
+- **Interpretation:** the next implementation step is now safe to begin: add the execution-intent persistence contract to SQLite and PostgreSQL with migration 005, preserving the existing tables and rows. No approval consumption or coordinator wiring is included in that first storage increment.
+- **Preservation and cost:** compare remains 27 commits ahead / 0 behind with no removed paths. No production migration, database write, deployment, provider call, package addition or paid infrastructure was performed; GitHub Actions billing impact is not visible.

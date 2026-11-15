@@ -4,7 +4,7 @@ from unittest.mock import patch
 from pathlib import Path
 from unexpected_runtime.coordinator import Coordinator
 from unexpected_runtime.providers import DeterministicMockProvider, ProviderError, provider_from_env
-from unexpected_runtime.models import ApprovalContext, ApprovalExecutionBinding, CancellationToken, EvaluationReport, PermissionDenied, CycleLimitError, BudgetExceeded, ImprovementRejected
+from unexpected_runtime.models import TaskRequest, ApprovalContext, ApprovalExecutionBinding, CancellationToken, EvaluationReport, PermissionDenied, CycleLimitError, BudgetExceeded, ImprovementRejected
 from unexpected_runtime.improvement import ImprovementGovernor
 from unexpected_runtime.permissions import PermissionPolicy
 from unexpected_runtime.storage import StateStore
@@ -98,6 +98,36 @@ class RuntimeTests(unittest.TestCase):
         with self.assertRaises(BudgetExceeded): self.c.run_chain(['research-scout','web-scout','orchestrator'],'x',max_handoffs=1)
     def test_privileged_permission_denied_by_default(self):
         with self.assertRaises(PermissionDenied): self.c.invoke('orchestrator','publish this',required_permissions=('publish',))
+    def test_queued_privileged_execution_is_blocked_after_restart(self):
+        execution_id = "recovery-execution"
+        task_id = "recovery-task"
+        self.c.store.create_approval_execution_intent(
+            execution_id, task_id, "b" * 64, "a" * 64, "publish", None, None
+        )
+        self.assertTrue(self.c.store.transition_approval_execution_intent(
+            execution_id, "prepared", "awaiting_approval", 0
+        ))
+        self.assertTrue(self.c.store.transition_approval_execution_intent(
+            execution_id, "awaiting_approval", "approved", 1
+        ))
+        self.assertTrue(self.c.store.transition_approval_execution_intent(
+            execution_id, "approved", "enqueued", 2
+        ))
+        request = TaskRequest.create(
+            "orchestrator", "recovered privileged action must not replay",
+            task_id=task_id, required_permissions=("publish",),
+            execution_id=execution_id, approval_reference="one-use-approval",
+        )
+        self.c.store.enqueue(request)
+
+        results = self.c.run_queued(limit=1)
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].status, "failed")
+        self.assertIn("automatic replay is forbidden", results[0].error)
+        self.assertEqual(self.c.store.get_task(task_id)["status"], "failed")
+        intent = self.c.store.get_approval_execution_intent(execution_id)
+        self.assertEqual(intent["state"], "blocked")
     def test_privileged_permission_requires_trusted_action_bound_approval(self):
         verifier=TestHostApprovalVerifier()
         self.c.approval_verifier=verifier

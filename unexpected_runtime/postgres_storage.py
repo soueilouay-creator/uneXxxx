@@ -360,6 +360,132 @@ class PostgresStateStore(PostgresIdempotencyMixin):
             ).fetchall()
         return [self._decode_workflow_stage(row) for row in rows]
 
+    _WORKFLOW_STAGE_APPROVAL_TRANSITIONS = {
+        "awaiting_approval": {"approved", "blocked"},
+        "approved": {"enqueued", "blocked"},
+        "enqueued": {"completed", "blocked"},
+        "completed": set(), "blocked": set(),
+    }
+
+    @staticmethod
+    def _require_workflow_stage_approval_schema(connection):
+        row = connection.execute(
+            "SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1"
+        ).fetchone()
+        if not row or int(row["version"]) < 7:
+            raise PostgresStorageError(
+                "PostgreSQL workflow stage approvals require additive migration 007."
+            )
+
+    @staticmethod
+    def _validate_workflow_stage_approval_values(workflow_id, stage_key, stage_request_hash,
+                                                 execution_id, task_id, action_digest, permission):
+        for field, value in (("workflow_id", workflow_id), ("stage_key", stage_key),
+                             ("execution_id", execution_id), ("task_id", task_id),
+                             ("permission", permission)):
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"{field} must be a non-empty string.")
+        PostgresStateStore._validate_workflow_hash(stage_request_hash, "stage_request_hash")
+        PostgresStateStore._validate_workflow_hash(action_digest, "action_digest")
+        if len(workflow_id) > 128 or len(stage_key) > 128:
+            raise ValueError("workflow_id and stage_key must not exceed 128 characters.")
+
+    def create_workflow_stage_approval_intent(self, workflow_id: str, stage_key: str,
+                                              stage_request_hash: str, execution_id: str,
+                                              task_id: str, action_digest: str,
+                                              permission: str):
+        self._validate_workflow_stage_approval_values(
+            workflow_id, stage_key, stage_request_hash, execution_id, task_id, action_digest, permission
+        )
+        now = time.time()
+        identity = {
+            "workflow_id": workflow_id, "stage_key": stage_key,
+            "stage_request_hash": stage_request_hash, "execution_id": execution_id,
+            "task_id": task_id, "action_digest": action_digest, "permission": permission,
+        }
+        with self._session() as connection:
+            self._require_workflow_stage_approval_schema(connection)
+            parent = connection.execute(
+                "SELECT status FROM workflow_checkpoints WHERE workflow_id=%s FOR UPDATE", (workflow_id,)
+            ).fetchone()
+            if not parent or parent["status"] != "running":
+                raise ValueError("Stage approval requires an existing running workflow checkpoint.")
+            execution = connection.execute(
+                "SELECT task_id,action_digest,permission,workflow_id,stage_key,state "
+                "FROM approval_execution_intents WHERE intent_id=%s FOR UPDATE", (execution_id,)
+            ).fetchone()
+            if (not execution or execution["task_id"] != task_id
+                    or execution["action_digest"] != action_digest
+                    or execution["permission"] != permission
+                    or execution["workflow_id"] != workflow_id
+                    or execution["stage_key"] != stage_key
+                    or execution["state"] != "awaiting_approval"):
+                raise ValueError("Stage approval identity does not match its prepared execution intent.")
+            connection.execute(
+                "INSERT INTO workflow_stage_approval_intents("
+                "workflow_id,stage_key,stage_request_hash,execution_id,task_id,action_digest,permission,"
+                "approval_id,state,revision,created_at,updated_at) "
+                "VALUES(%s,%s,%s,%s,%s,%s,%s,NULL,'awaiting_approval',0,%s,%s) "
+                "ON CONFLICT(workflow_id,stage_key) DO NOTHING",
+                (workflow_id,stage_key,stage_request_hash,execution_id,task_id,action_digest,permission,now,now),
+            )
+            row = connection.execute(
+                "SELECT * FROM workflow_stage_approval_intents WHERE workflow_id=%s AND stage_key=%s",
+                (workflow_id,stage_key),
+            ).fetchone()
+        if not row:
+            raise RuntimeError("Workflow stage approval intent was not persisted.")
+        item = dict(row)
+        if any(item[key] != value for key, value in identity.items()):
+            raise ValueError("Workflow stage key is already bound to a different request or execution.")
+        return item
+
+    def get_workflow_stage_approval_intent(self, workflow_id: str, stage_key: str):
+        for field, value in (("workflow_id",workflow_id),("stage_key",stage_key)):
+            if not isinstance(value,str) or not value.strip():
+                raise ValueError(f"{field} must be a non-empty string.")
+        with self._session() as connection:
+            self._require_workflow_stage_approval_schema(connection)
+            row = connection.execute(
+                "SELECT * FROM workflow_stage_approval_intents WHERE workflow_id=%s AND stage_key=%s",
+                (workflow_id,stage_key),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def transition_workflow_stage_approval_intent(self, workflow_id: str, stage_key: str,
+                                                 expected_state: str, next_state: str,
+                                                 expected_revision: int,
+                                                 approval_id: str | None = None) -> bool:
+        if expected_state not in self._WORKFLOW_STAGE_APPROVAL_TRANSITIONS or next_state not in self._WORKFLOW_STAGE_APPROVAL_TRANSITIONS:
+            raise ValueError("Unsupported workflow stage approval state.")
+        if isinstance(expected_revision,bool) or not isinstance(expected_revision,int) or expected_revision<0:
+            raise ValueError("expected_revision must be a non-negative integer.")
+        if next_state not in self._WORKFLOW_STAGE_APPROVAL_TRANSITIONS[expected_state]:
+            current=self.get_workflow_stage_approval_intent(workflow_id,stage_key)
+            if not current or current["state"]!=expected_state or int(current["revision"])!=expected_revision:
+                return False
+            raise ValueError(f"Illegal workflow stage approval transition: {expected_state} -> {next_state}.")
+        if next_state=="approved":
+            if not isinstance(approval_id,str) or not approval_id.strip():
+                raise ValueError("The approved transition requires a non-empty approval_id.")
+        elif approval_id is not None:
+            raise ValueError("approval_id may be supplied only when transitioning to approved.")
+        with self._session() as connection:
+            self._require_workflow_stage_approval_schema(connection)
+            if next_state=="approved":
+                cursor=connection.execute(
+                    "UPDATE workflow_stage_approval_intents SET state=%s,approval_id=%s,revision=revision+1,updated_at=%s "
+                    "WHERE workflow_id=%s AND stage_key=%s AND state=%s AND revision=%s AND approval_id IS NULL",
+                    (next_state,approval_id,time.time(),workflow_id,stage_key,expected_state,expected_revision),
+                )
+            else:
+                cursor=connection.execute(
+                    "UPDATE workflow_stage_approval_intents SET state=%s,revision=revision+1,updated_at=%s "
+                    "WHERE workflow_id=%s AND stage_key=%s AND state=%s AND revision=%s",
+                    (next_state,time.time(),workflow_id,stage_key,expected_state,expected_revision),
+                )
+        return cursor.rowcount==1
+
     @staticmethod
     def _validate_approval_execution_intent_values(intent_id, task_id, request_hash,
                                                    action_digest, permission, workflow_id, stage_key):

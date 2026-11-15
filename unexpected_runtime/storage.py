@@ -69,6 +69,24 @@ class StateStore:
             );
             CREATE INDEX IF NOT EXISTS idx_approval_execution_intents_state_updated
                 ON approval_execution_intents(state,updated_at);
+            CREATE TABLE IF NOT EXISTS workflow_stage_approval_intents(
+                workflow_id TEXT NOT NULL REFERENCES workflow_checkpoints(workflow_id) ON DELETE RESTRICT,
+                stage_key TEXT NOT NULL,
+                stage_request_hash TEXT NOT NULL CHECK(length(stage_request_hash)=64 AND stage_request_hash NOT GLOB '*[^0-9a-f]*'),
+                execution_id TEXT NOT NULL UNIQUE REFERENCES approval_execution_intents(intent_id) ON DELETE RESTRICT,
+                task_id TEXT NOT NULL UNIQUE,
+                action_digest TEXT NOT NULL CHECK(length(action_digest)=64 AND action_digest NOT GLOB '*[^0-9a-f]*'),
+                permission TEXT NOT NULL CHECK(length(trim(permission))>0),
+                approval_id TEXT UNIQUE,
+                state TEXT NOT NULL CHECK(state IN ('awaiting_approval','approved','enqueued','completed','blocked')),
+                revision INTEGER NOT NULL DEFAULT 0 CHECK(revision>=0),
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL,
+                PRIMARY KEY(workflow_id,stage_key),
+                CHECK(length(trim(stage_key))>0)
+            );
+            CREATE INDEX IF NOT EXISTS idx_workflow_stage_approval_state_updated
+                ON workflow_stage_approval_intents(state,updated_at);
 
             CREATE INDEX IF NOT EXISTS idx_idempotency_claims_state_updated ON idempotency_claims(state,updated_at);
             CREATE TABLE IF NOT EXISTS outcomes(outcome_id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, task_id TEXT, success INTEGER NOT NULL, feedback TEXT NOT NULL, provenance_json TEXT NOT NULL, created_at REAL NOT NULL);
@@ -344,6 +362,123 @@ class StateStore:
                 (workflow_id,),
             ).fetchall()
         return [self._decode_workflow_stage(row) for row in rows]
+
+    _WORKFLOW_STAGE_APPROVAL_TRANSITIONS = {
+        "awaiting_approval": {"approved", "blocked"},
+        "approved": {"enqueued", "blocked"},
+        "enqueued": {"completed", "blocked"},
+        "completed": set(), "blocked": set(),
+    }
+
+    @staticmethod
+    def _validate_workflow_stage_approval_values(workflow_id, stage_key, stage_request_hash,
+                                                 execution_id, task_id, action_digest, permission):
+        for field, value in (("workflow_id", workflow_id), ("stage_key", stage_key),
+                             ("execution_id", execution_id), ("task_id", task_id),
+                             ("permission", permission)):
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"{field} must be a non-empty string.")
+        StateStore._validate_workflow_hash(stage_request_hash, "stage_request_hash")
+        StateStore._validate_workflow_hash(action_digest, "action_digest")
+        if len(workflow_id) > 128 or len(stage_key) > 128:
+            raise ValueError("workflow_id and stage_key must not exceed 128 characters.")
+
+    def create_workflow_stage_approval_intent(self, workflow_id: str, stage_key: str,
+                                              stage_request_hash: str, execution_id: str,
+                                              task_id: str, action_digest: str,
+                                              permission: str):
+        """Create an immutable workflow-stage reference to a prepared approval execution."""
+        self._validate_workflow_stage_approval_values(
+            workflow_id, stage_key, stage_request_hash, execution_id, task_id, action_digest, permission
+        )
+        now = time.time()
+        identity = {
+            "workflow_id": workflow_id, "stage_key": stage_key,
+            "stage_request_hash": stage_request_hash, "execution_id": execution_id,
+            "task_id": task_id, "action_digest": action_digest, "permission": permission,
+        }
+        with self._session() as c:
+            parent = c.execute(
+                "SELECT status FROM workflow_checkpoints WHERE workflow_id=?", (workflow_id,)
+            ).fetchone()
+            if not parent or parent["status"] != "running":
+                raise ValueError("Stage approval requires an existing running workflow checkpoint.")
+            execution = c.execute(
+                "SELECT task_id,action_digest,permission,workflow_id,stage_key,state "
+                "FROM approval_execution_intents WHERE intent_id=?", (execution_id,)
+            ).fetchone()
+            if (not execution or execution["task_id"] != task_id
+                    or execution["action_digest"] != action_digest
+                    or execution["permission"] != permission
+                    or execution["workflow_id"] != workflow_id
+                    or execution["stage_key"] != stage_key
+                    or execution["state"] != "awaiting_approval"):
+                raise ValueError("Stage approval identity does not match its prepared execution intent.")
+            c.execute(
+                "INSERT OR IGNORE INTO workflow_stage_approval_intents("
+                "workflow_id,stage_key,stage_request_hash,execution_id,task_id,action_digest,permission,"
+                "approval_id,state,revision,created_at,updated_at) "
+                "VALUES(?,?,?,?,?,?,?,NULL,'awaiting_approval',0,?,?)",
+                (workflow_id, stage_key, stage_request_hash, execution_id, task_id, action_digest, permission, now, now),
+            )
+            row = c.execute(
+                "SELECT * FROM workflow_stage_approval_intents WHERE workflow_id=? AND stage_key=?",
+                (workflow_id, stage_key),
+            ).fetchone()
+        if not row:
+            raise RuntimeError("Workflow stage approval intent was not persisted.")
+        item = dict(row)
+        if any(item[key] != value for key, value in identity.items()):
+            raise ValueError("Workflow stage key is already bound to a different request or execution.")
+        return item
+
+    def get_workflow_stage_approval_intent(self, workflow_id: str, stage_key: str):
+        for field, value in (("workflow_id", workflow_id), ("stage_key", stage_key)):
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"{field} must be a non-empty string.")
+        with self._session() as c:
+            row = c.execute(
+                "SELECT * FROM workflow_stage_approval_intents WHERE workflow_id=? AND stage_key=?",
+                (workflow_id, stage_key),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def transition_workflow_stage_approval_intent(self, workflow_id: str, stage_key: str,
+                                                 expected_state: str, next_state: str,
+                                                 expected_revision: int,
+                                                 approval_id: str | None = None) -> bool:
+        if expected_state not in self._WORKFLOW_STAGE_APPROVAL_TRANSITIONS:
+            raise ValueError("expected_state is not a supported workflow stage approval state.")
+        if next_state not in self._WORKFLOW_STAGE_APPROVAL_TRANSITIONS:
+            raise ValueError("next_state is not a supported workflow stage approval state.")
+        if (isinstance(expected_revision, bool) or not isinstance(expected_revision, int)
+                or expected_revision < 0):
+            raise ValueError("expected_revision must be a non-negative integer.")
+        if next_state not in self._WORKFLOW_STAGE_APPROVAL_TRANSITIONS[expected_state]:
+            current = self.get_workflow_stage_approval_intent(workflow_id, stage_key)
+            if (not current or current["state"] != expected_state
+                    or int(current["revision"]) != expected_revision):
+                return False
+            raise ValueError(f"Illegal workflow stage approval transition: {expected_state} -> {next_state}.")
+        if next_state == "approved":
+            if not isinstance(approval_id, str) or not approval_id.strip():
+                raise ValueError("The approved transition requires a non-empty approval_id.")
+        elif approval_id is not None:
+            raise ValueError("approval_id may be supplied only when transitioning to approved.")
+        with self._session() as c:
+            if next_state == "approved":
+                cursor = c.execute(
+                    "UPDATE workflow_stage_approval_intents SET state=?,approval_id=?,revision=revision+1,updated_at=? "
+                    "WHERE workflow_id=? AND stage_key=? AND state=? AND revision=? AND approval_id IS NULL",
+                    (next_state, approval_id, time.time(), workflow_id, stage_key, expected_state, expected_revision),
+                )
+            else:
+                cursor = c.execute(
+                    "UPDATE workflow_stage_approval_intents SET state=?,revision=revision+1,updated_at=? "
+                    "WHERE workflow_id=? AND stage_key=? AND state=? AND revision=?",
+                    (next_state, time.time(), workflow_id, stage_key, expected_state, expected_revision),
+                )
+        return cursor.rowcount == 1
 
     @staticmethod
     def _validate_approval_execution_intent_values(intent_id, task_id, request_hash,

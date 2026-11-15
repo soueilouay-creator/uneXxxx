@@ -192,7 +192,7 @@ class Coordinator:
                 or intent.get('workflow_id')!=binding.workflow_id or intent.get('stage_key')!=binding.stage_key):
             raise PermissionDenied('The invocation differs from the exact prepared action or execution identity.')
         self.permissions.authorize_bound(spec,scope,approval,action_details=details,binding=binding)
-        reader=getattr(self.approval_verifier,'get_consumed_binding',None)
+        reader=getattr(self.permissions.approval_verifier,'get_consumed_binding',None)
         try:
             consumed=reader(approval.approval_id) if callable(reader) else None
         except Exception:
@@ -390,7 +390,7 @@ class Coordinator:
         for _ in range(max_tasks):
             row=self.store.claim_next()
             if not row: break
-            d=json.loads(row['payload_json']); req=TaskRequest(task_id=d['task_id'],agent_id=d['agent_id'],objective=d['objective'],inputs=d.get('inputs',{}),required_permissions=tuple(d.get('required_permissions',[])),deadline_seconds=d.get('deadline_seconds',30),max_steps=d.get('max_steps',6),idempotency_key=d.get('idempotency_key'),source_refs=tuple(d.get('source_refs',[])),provider_route=d.get('provider_route'),requested_skill_ids=tuple(d.get('requested_skill_ids',[])),parent_task_id=d.get('parent_task_id'),created_at=d.get('created_at',time.time()))
+            d=json.loads(row['payload_json']); req=TaskRequest(task_id=d['task_id'],agent_id=d['agent_id'],objective=d['objective'],inputs=d.get('inputs',{}),required_permissions=tuple(d.get('required_permissions',[])),deadline_seconds=d.get('deadline_seconds',30),max_steps=d.get('max_steps',6),idempotency_key=d.get('idempotency_key'),source_refs=tuple(d.get('source_refs',[])),provider_route=d.get('provider_route'),requested_skill_ids=tuple(d.get('requested_skill_ids',[])),parent_task_id=d.get('parent_task_id'),execution_id=d.get('execution_id'),approval_reference=d.get('approval_reference'),created_at=d.get('created_at',time.time()))
             results.append(self._execute_with_deadline(req,CancellationToken()))
         return results
     def cancel(self,task_id:str)->bool:

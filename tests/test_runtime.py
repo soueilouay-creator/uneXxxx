@@ -4,7 +4,7 @@ from unittest.mock import patch
 from pathlib import Path
 from unexpected_runtime.coordinator import Coordinator
 from unexpected_runtime.providers import DeterministicMockProvider, ProviderError, provider_from_env
-from unexpected_runtime.models import ApprovalContext, CancellationToken, EvaluationReport, PermissionDenied, CycleLimitError, BudgetExceeded, ImprovementRejected
+from unexpected_runtime.models import ApprovalContext, ApprovalExecutionBinding, CancellationToken, EvaluationReport, PermissionDenied, CycleLimitError, BudgetExceeded, ImprovementRejected
 from unexpected_runtime.improvement import ImprovementGovernor
 from unexpected_runtime.permissions import PermissionPolicy
 from unexpected_runtime.storage import StateStore
@@ -28,11 +28,26 @@ class FlakyProvider(DeterministicMockProvider):
         return super().generate(**kwargs)
 
 class TestHostApprovalVerifier:
+    def __init__(self):
+        self.bindings = {}
+
     def verify(self, approval, permission, action_digest):
         return (approval.approval_id.startswith('verified-test-')
                 and approval.approver == 'trusted-host-user'
                 and approval.action_digest == action_digest
                 and permission in approval.approved_permissions)
+
+    def verify_bound(self, approval, permission, action_digest, binding):
+        if not isinstance(binding, ApprovalExecutionBinding) or not self.verify(approval, permission, action_digest):
+            return False
+        self.bindings[approval.approval_id] = {
+            "approval_id": approval.approval_id, "action_digest": action_digest,
+            "permission": permission, **binding.to_dict(), "consumed_at": 1.0,
+        }
+        return True
+
+    def get_consumed_binding(self, approval_id):
+        return self.bindings.get(approval_id)
 
 class CountingProvider(DeterministicMockProvider):
     def __init__(self, delay=.04): super().__init__(); self.delay=delay; self.active=0; self.max_active=0; self.lock=threading.Lock()
@@ -84,13 +99,17 @@ class RuntimeTests(unittest.TestCase):
     def test_privileged_permission_denied_by_default(self):
         with self.assertRaises(PermissionDenied): self.c.invoke('orchestrator','publish this',required_permissions=('publish',))
     def test_privileged_permission_requires_trusted_action_bound_approval(self):
-        self.c.permissions=PermissionPolicy(TestHostApprovalVerifier())
+        verifier=TestHostApprovalVerifier()
+        self.c.approval_verifier=verifier
+        self.c.permissions=PermissionPolicy(verifier)
         objective='publish action simulation only'
-        details=Coordinator.invoke_action_details('orchestrator',objective,required_permissions=('publish',))
+        prepared=self.c.prepare_invoke('orchestrator',objective,required_permissions=('publish',))
         approval=ApprovalContext('verified-test-publish','trusted-host-user',frozenset({'publish'}),'approved test only',
-                                 action_digest=self.c.permissions.approval_digest(details))
-        r=self.c.invoke('orchestrator',objective,required_permissions=('publish',),approval=approval)
+                                 action_digest=self.c.permissions.approval_digest(prepared['action_details']))
+        r=self.c.invoke('orchestrator',objective,required_permissions=('publish',),
+                        execution_id=prepared['execution_id'],approval=approval)
         self.assertEqual(r.status,'completed')
+        self.assertEqual(r.task_id,prepared['task_id'])
     def test_memory_namespaces_are_isolated(self):
         self.c.set_agent_memory('research-scout','private_note',{'source':'A'})
         self.assertEqual(self.c.get_agent_memory('research-scout','private_note')['source'],'A')

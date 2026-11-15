@@ -279,27 +279,6 @@ class GitHubPullRequestApprovalVerifier:
             ).fetchone()
         return dict(row) if row else None
 
-    def get_consumed_binding(self, approval_id: str) -> dict[str, Any] | None:
-        """Read back an immutable consumed approval binding without changing it."""
-        if not isinstance(approval_id, str) or not approval_id.strip():
-            return None
-        if self.ledger is not None:
-            try:
-                row=self.ledger.get_consumed_binding(approval_id)
-                return dict(row) if row is not None else None
-            except Exception:
-                return None
-        if not self.ledger_path.exists():
-            return None
-        with sqlite3.connect(self.ledger_path, timeout=5.0) as connection:
-            connection.row_factory=sqlite3.Row
-            connection.execute('PRAGMA busy_timeout=5000')
-            row=connection.execute(
-                'SELECT approval_id,action_digest,permission,execution_id,task_id,workflow_id,stage_key,consumed_at '
-                'FROM approval_execution_bindings WHERE approval_id=?',(approval_id,)
-            ).fetchone()
-        return dict(row) if row else None
-
     def verify(self, approval: Any, permission: str, action_digest: str) -> bool:
         return self._verify(approval, permission, action_digest, binding=None)
 

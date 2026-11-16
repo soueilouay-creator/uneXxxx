@@ -162,7 +162,8 @@ class StateStore:
             ).fetchall()
         return [dict(row) for row in rows]
     def enqueue(self,request):
-        payload={'task_id':request.task_id,'agent_id':request.agent_id,'objective':request.objective,'inputs':request.inputs,'required_permissions':list(request.required_permissions),'deadline_seconds':request.deadline_seconds,'max_steps':request.max_steps,'idempotency_key':request.idempotency_key,'source_refs':list(request.source_refs),'provider_route':request.provider_route,'requested_skill_ids':list(request.requested_skill_ids),'parent_task_id':request.parent_task_id,'created_at':request.created_at}
+        payload={'task_id':request.task_id,'agent_id':request.agent_id,'objective':request.objective,'inputs':request.inputs,'required_permissions':list(request.required_permissions),'deadline_seconds':request.deadline_seconds,'max_steps':request.max_steps,'idempotency_key':request.idempotency_key,'source_refs':list(request.source_refs),'provider_route':request.provider_route,'requested_skill_ids':list(request.requested_skill_ids),'parent_task_id':request.parent_task_id,'execution_id':getattr(request,'execution_id',None),'
+        'approval_reference':getattr(request,'approval_reference',None),'created_at':request.created_at}
         now=time.time()
         with self._session() as c: c.execute('INSERT INTO tasks(task_id,agent_id,status,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)',(request.task_id,request.agent_id,'queued',json.dumps(payload,ensure_ascii=False),now,now))
         self.log_event('task_queued',request.task_id,request.agent_id,{'objective':request.objective[:160]})

@@ -378,6 +378,7 @@ class CoordinatorLifecycleTests(unittest.TestCase):
     def test_authenticated_http_lifecycle_endpoint_uses_native_workflow(self):
         import json
         import threading
+        import urllib.error
         import urllib.request
         from unexpected_runtime.http_api import create_server
 
@@ -402,13 +403,17 @@ class CoordinatorLifecycleTests(unittest.TestCase):
                 headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"},
                 method="POST",
             )
-            with urllib.request.urlopen(request, timeout=10) as response:
-                payload = json.loads(response.read().decode("utf-8"))
-                self.assertEqual(response.status, 200)
-                self.assertEqual(payload["result"]["status"], "delivered")
-                self.assertEqual(payload["result"]["workflow_id"], "http-lifecycle-checkpoint-fixture")
-                checkpoint = coordinator.store.get_workflow_checkpoint("http-lifecycle-checkpoint-fixture")
-                self.assertEqual(checkpoint["status"], "completed")
+            try:
+                with urllib.request.urlopen(request, timeout=10) as response:
+                    payload = json.loads(response.read().decode("utf-8"))
+                    self.assertEqual(response.status, 200)
+                    self.assertEqual(payload["result"]["status"], "delivered")
+                    self.assertEqual(payload["result"]["workflow_id"], "http-lifecycle-checkpoint-fixture")
+                    checkpoint = coordinator.store.get_workflow_checkpoint("http-lifecycle-checkpoint-fixture")
+                    self.assertEqual(checkpoint["status"], "completed")
+            except urllib.error.HTTPError as exc:
+                detail = exc.read().decode("utf-8", "replace")
+                self.fail(f"HTTP lifecycle returned {exc.code}: {detail}")
             replay_request = urllib.request.Request(
                 url, data=body,
                 headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"},
@@ -529,7 +534,9 @@ class CoordinatorLifecycleTests(unittest.TestCase):
         )
         lifecycle_thread.start()
         try:
-            self.assertTrue(coordinator.started.wait(timeout=2))
+            if not coordinator.started.wait(timeout=2):
+                lifecycle_thread.join(timeout=1)
+                self.fail(f"Lifecycle handler did not reach run_lifecycle; response={first_result!r}")
             busy_status, busy_payload = post("/v1/lifecycle")
             self.assertEqual(busy_status, 503, busy_payload)
             invoke_status, invoke_payload = post("/v1/invoke")

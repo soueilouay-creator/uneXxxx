@@ -71,6 +71,19 @@ class PostgresWorkflowStageApprovalProofTests(unittest.TestCase):
         self.assertTrue(persisted["approval_id"].startswith("approval-"))
         self.assertEqual(persisted["revision"], 1)
 
+    def test_generic_enqueue_preserves_optional_execution_binding_fields(self):
+        request = TaskRequest.create(
+            "orchestrator", "preserve optional approval binding metadata",
+            required_permissions=(self.permission,),
+            execution_id="generic-execution-" + uuid.uuid4().hex,
+            approval_reference="generic-approval-reference",
+        )
+        self.store.enqueue(request)
+        task = self.store.get_task(request.task_id)
+        payload = json.loads(task["payload_json"])
+        self.assertEqual(payload["execution_id"], request.execution_id)
+        self.assertEqual(payload["approval_reference"], request.approval_reference)
+
     def test_restart_readback_blocks_queued_consumed_approval_instead_of_replaying(self):
         self.assertTrue(self.store.transition_workflow_stage_approval_intent(
             self.workflow_id, self.stage_key, "awaiting_approval", "approved", 0, "approval-recovery"
@@ -98,6 +111,18 @@ class PostgresWorkflowStageApprovalProofTests(unittest.TestCase):
         task_payload = json.loads(task["payload_json"])
         self.assertEqual(task_payload["execution_id"], self.execution_id)
         self.assertEqual(task_payload["approval_reference"], "approval-recovery")
+        from unexpected_runtime.coordinator import Coordinator
+        worker = Coordinator.__new__(Coordinator)
+        worker.store = restarted
+        results = worker.run_queued(max_tasks=1)
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].status, "failed")
+        self.assertIn("automatic replay is forbidden", results[0].error)
+        self.assertEqual(restarted.get_task(self.task_id)["status"], "failed")
+        self.assertEqual(restarted.get_approval_execution_intent(self.execution_id)["state"], "blocked")
+        self.assertEqual(restarted.get_workflow_stage_approval_intent(
+            self.workflow_id, self.stage_key
+        )["state"], "blocked")
 
         self.assertTrue(restarted.transition_approval_execution_intent(
             self.execution_id, "enqueued", "blocked", int(execution["revision"])

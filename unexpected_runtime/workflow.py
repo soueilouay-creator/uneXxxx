@@ -190,7 +190,9 @@ class WorkflowRunner:
             get_execution = getattr(self.checkpoint_store, "get_approval_execution_intent", None)
             get_stage = getattr(self.checkpoint_store, "get_workflow_stage_approval_intent", None)
             if not execution_id or not approval_reference or not callable(get_execution) or not callable(get_stage):
-                raise WorkflowCheckpointBlocked(f"Completed protected stage {stage_key} lacks durable approval evidence.")
+                raise WorkflowCheckpointBlocked(
+                    f"Completed protected stage {stage_key} lacks durable approval evidence; human review is required."
+                )
             execution = get_execution(execution_id)
             stage = get_stage(workflow_id, stage_key)
             if (not isinstance(execution, dict) or not isinstance(stage, dict)

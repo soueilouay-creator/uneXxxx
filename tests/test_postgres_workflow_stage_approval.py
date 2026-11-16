@@ -211,6 +211,16 @@ os._exit(74)
         task_payload = json.loads(task["payload_json"])
         self.assertEqual(task_payload["execution_id"], self.execution_id)
         self.assertEqual(task_payload["approval_reference"], "approval-recovery")
+
+        # The CI PostgreSQL database is shared by test cases. Make this fixture
+        # the oldest queued row so run_queued cannot accidentally claim a
+        # leftover task from an earlier test and give a misleading result.
+        with self.store._session() as connection:
+            connection.execute(
+                "UPDATE tasks SET created_at=%s WHERE task_id=%s",
+                (-1.0, self.task_id),
+            )
+
         child_script = r"""
 import json
 import os

@@ -3,12 +3,20 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import subprocess
+import sys
+import tempfile
 import threading
 import unittest
 import uuid
+from pathlib import Path
 
 from unexpected_runtime.models import TaskRequest
 from unexpected_runtime.postgres_storage import PostgresStateStore
+from unexpected_runtime.workflow import WorkflowRunner
+
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class PostgresWorkflowStageApprovalProofTests(unittest.TestCase):
@@ -71,6 +79,98 @@ class PostgresWorkflowStageApprovalProofTests(unittest.TestCase):
         self.assertTrue(persisted["approval_id"].startswith("approval-"))
         self.assertEqual(persisted["revision"], 1)
 
+    def test_abrupt_process_exit_keeps_started_postgres_stage_blocked_after_reopen(self):
+        workflow_id = "postgres-process-termination-" + uuid.uuid4().hex
+        request = {"objective": "prove interrupted PostgreSQL stage is not replayed"}
+        identity = {"request": request, "provider_route": "fixture"}
+        with tempfile.TemporaryDirectory() as directory:
+            marker_path = Path(directory) / "stage-entered.txt"
+            child_script = r"""
+import os
+import sys
+from pathlib import Path
+from unexpected_runtime.postgres_storage import PostgresStateStore
+from unexpected_runtime.workflow import WorkflowRunner
+
+marker_path = sys.argv[1]
+workflow_id = os.environ["TEST_WORKFLOW_ID"]
+request = {"objective": "prove interrupted PostgreSQL stage is not replayed"}
+identity = {"request": request, "provider_route": "fixture"}
+store = PostgresStateStore(os.environ["TEST_POSTGRES_DSN"])
+
+def terminate_after_stage_claim(*_args):
+    Path(marker_path).write_text("stage callback entered", encoding="utf-8")
+    os._exit(73)
+
+runner = WorkflowRunner(
+    plan=terminate_after_stage_claim,
+    execute=lambda *_args: {"text": "must not execute"},
+    verify=lambda *_args: {"passed": True, "feedback": ""},
+    improve=lambda candidate, _feedback: candidate,
+    deliver=lambda candidate: candidate,
+    learn=lambda _record: None,
+    checkpoint_store=store,
+)
+runner.run(request, workflow_id=workflow_id, checkpoint_identity=identity)
+os._exit(74)
+"""
+            child_env = {
+                key: os.environ[key]
+                for key in ("PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP")
+                if key in os.environ
+            }
+            child_env["TEST_POSTGRES_DSN"] = self.dsn
+            child_env["TEST_WORKFLOW_ID"] = workflow_id
+            child_env["PYTHONPATH"] = os.pathsep.join(
+                item for item in (str(ROOT), os.environ.get("PYTHONPATH", "")) if item
+            )
+            child_env["PYTHONIOENCODING"] = "utf-8"
+            child = subprocess.run(
+                [sys.executable, "-c", child_script, str(marker_path)],
+                cwd=ROOT,
+                env=child_env,
+                capture_output=True,
+                text=True,
+                timeout=20,
+                check=False,
+            )
+            self.assertEqual(
+                child.returncode, 73,
+                msg=f"child did not stop at the intended stage: stdout={child.stdout!r} stderr={child.stderr!r}",
+            )
+            self.assertEqual(marker_path.read_text(encoding="utf-8"), "stage callback entered")
+
+        reopened = PostgresStateStore(self.dsn)
+        checkpoint_before = reopened.get_workflow_checkpoint(workflow_id)
+        stages_before = reopened.list_workflow_stages(workflow_id)
+        self.assertIsNotNone(checkpoint_before)
+        self.assertEqual(checkpoint_before["status"], "running")
+        self.assertEqual(len(stages_before), 1)
+        self.assertEqual(stages_before[0]["stage_key"], "0001:plan")
+        self.assertEqual(stages_before[0]["status"], "started")
+        original_attempt_token = stages_before[0]["attempt_token"]
+
+        calls = []
+        runner = WorkflowRunner(
+            plan=lambda *_args: calls.append("plan") or {"text": "must remain blocked"},
+            execute=lambda *_args: calls.append("execute"),
+            verify=lambda *_args: calls.append("verify") or {"passed": True, "feedback": ""},
+            improve=lambda *_args: calls.append("improve"),
+            deliver=lambda *_args: calls.append("deliver"),
+            learn=lambda *_args: calls.append("learn"),
+            checkpoint_store=reopened,
+        )
+        result = runner.run(request, workflow_id=workflow_id, checkpoint_identity=identity)
+        self.assertEqual(result.status, "blocked_execution")
+        self.assertIn("already marked started", result.error or "")
+        self.assertEqual(calls, [])
+        checkpoint_after = reopened.get_workflow_checkpoint(workflow_id)
+        stages_after = reopened.list_workflow_stages(workflow_id)
+        self.assertEqual(checkpoint_after["status"], "running")
+        self.assertEqual(checkpoint_after["revision"], checkpoint_before["revision"])
+        self.assertEqual(stages_after[0]["status"], "started")
+        self.assertEqual(stages_after[0]["attempt_token"], original_attempt_token)
+
     def test_generic_enqueue_preserves_optional_execution_binding_fields(self):
         request = TaskRequest.create(
             "orchestrator", "preserve optional approval binding metadata",
@@ -111,29 +211,50 @@ class PostgresWorkflowStageApprovalProofTests(unittest.TestCase):
         task_payload = json.loads(task["payload_json"])
         self.assertEqual(task_payload["execution_id"], self.execution_id)
         self.assertEqual(task_payload["approval_reference"], "approval-recovery")
-        from unexpected_runtime.coordinator import Coordinator
-        worker = Coordinator.__new__(Coordinator)
-        worker.store = restarted
-        results = worker.run_queued(max_tasks=1)
-        self.assertEqual(len(results), 1)
-        self.assertEqual(results[0].status, "failed")
-        self.assertIn("automatic replay is forbidden", results[0].error)
-        self.assertEqual(restarted.get_task(self.task_id)["status"], "failed")
-        self.assertEqual(restarted.get_approval_execution_intent(self.execution_id)["state"], "blocked")
-        self.assertEqual(restarted.get_workflow_stage_approval_intent(
-            self.workflow_id, self.stage_key
-        )["state"], "blocked")
+        child_script = r"""
+import json
+import os
+from unexpected_runtime.coordinator import Coordinator
+from unexpected_runtime.postgres_storage import PostgresStateStore
 
-        self.assertTrue(restarted.transition_approval_execution_intent(
-            self.execution_id, "enqueued", "blocked", int(execution["revision"])
-        ))
-        self.assertTrue(restarted.transition_workflow_stage_approval_intent(
-            self.workflow_id, self.stage_key, "enqueued", "blocked", int(stage["revision"])
-        ))
-        self.assertEqual(PostgresStateStore(self.dsn).get_approval_execution_intent(
-            self.execution_id
-        )["state"], "blocked")
-        self.assertEqual(PostgresStateStore(self.dsn).get_workflow_stage_approval_intent(
+store = PostgresStateStore(os.environ["TEST_POSTGRES_DSN"])
+worker = Coordinator.__new__(Coordinator)
+worker.store = store
+results = worker.run_queued(max_tasks=1)
+print(json.dumps([{"status": result.status, "error": result.error} for result in results]))
+"""
+        child_env = {
+            key: os.environ[key]
+            for key in ("PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP")
+            if key in os.environ
+        }
+        child_env["TEST_POSTGRES_DSN"] = self.dsn
+        child_env["PYTHONPATH"] = os.pathsep.join(
+            item for item in (str(ROOT), os.environ.get("PYTHONPATH", "")) if item
+        )
+        child_env["PYTHONIOENCODING"] = "utf-8"
+        child = subprocess.run(
+            [sys.executable, "-c", child_script],
+            cwd=ROOT,
+            env=child_env,
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+        )
+        self.assertEqual(
+            child.returncode, 0,
+            msg=f"recovery worker failed: stdout={child.stdout!r} stderr={child.stderr!r}",
+        )
+        child_results = json.loads(child.stdout.strip().splitlines()[-1])
+        self.assertEqual(len(child_results), 1)
+        self.assertEqual(child_results[0]["status"], "failed")
+        self.assertIn("automatic replay is forbidden", child_results[0]["error"])
+
+        recovered = PostgresStateStore(self.dsn)
+        self.assertEqual(recovered.get_task(self.task_id)["status"], "failed")
+        self.assertEqual(recovered.get_approval_execution_intent(self.execution_id)["state"], "blocked")
+        self.assertEqual(recovered.get_workflow_stage_approval_intent(
             self.workflow_id, self.stage_key
         )["state"], "blocked")
 

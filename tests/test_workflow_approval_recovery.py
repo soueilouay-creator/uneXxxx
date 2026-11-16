@@ -157,11 +157,11 @@ class WorkflowApprovalPauseResumeTests(unittest.TestCase):
                                   checkpoint_identity=self.identity)
         pending = first.to_dict()["pending_approval"]
         other_id = "different-workflow"
-        other = self.runner({"0001:plan": self.approval(pending["action_digest"])}).run(
+        other = self.runner({"0001:plan": self.approval(pending)}).run(
             self.request, workflow_id=other_id, checkpoint_identity=self.identity)
         self.assertEqual(other.status, "blocked_execution")
         self.assertEqual(self.calls, [])
-        wrong_stage = self.runner({"0002:execute": self.approval(pending["action_digest"])}).run(
+        wrong_stage = self.runner({"0002:execute": self.approval(pending)}).run(
             self.request, workflow_id=self.workflow_id, checkpoint_identity=self.identity)
         self.assertEqual(wrong_stage.status, "waiting_approval")
         self.assertEqual(self.calls, [])

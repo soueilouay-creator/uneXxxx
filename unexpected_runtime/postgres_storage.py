@@ -130,6 +130,8 @@ class PostgresStateStore(PostgresIdempotencyMixin):
             "provider_route": getattr(request, "provider_route", None),
             "requested_skill_ids": list(getattr(request, "requested_skill_ids", ())),
             "parent_task_id": getattr(request, "parent_task_id", None),
+            "execution_id": getattr(request, "execution_id", None),
+            "approval_reference": getattr(request, "approval_reference", None),
             "created_at": request.created_at,
         }
         now = time.time()

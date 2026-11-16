@@ -375,6 +375,20 @@ class CoordinatorLifecycleTests(unittest.TestCase):
                          ["before_improvement", "after_improvement", "after_improvement_2"])
         self.assertTrue(result.delivered)
 
+    def test_native_lifecycle_checkpoint_id_can_be_used_without_http(self):
+        coordinator, provider = self._coordinator(["PASS", "PASS"])
+        result = coordinator.run_lifecycle(
+            "research-scout", "Run a safe checkpointed workflow", {"scope": "fixture"},
+            max_corrections=0, max_improvements=2, deadline_seconds=5,
+            workflow_id="direct-lifecycle-checkpoint-fixture",
+        )
+        self.assertEqual(result.status, "delivered")
+        self.assertEqual(result.workflow_id, "direct-lifecycle-checkpoint-fixture")
+        self.assertEqual(coordinator.store.get_workflow_checkpoint(
+            "direct-lifecycle-checkpoint-fixture"
+        )["status"], "completed")
+        self.assertEqual(provider.review_calls, 2)
+
     def test_authenticated_http_lifecycle_endpoint_uses_native_workflow(self):
         import json
         import threading

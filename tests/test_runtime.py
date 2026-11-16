@@ -120,7 +120,7 @@ class RuntimeTests(unittest.TestCase):
         )
         self.c.store.enqueue(request)
 
-        results = self.c.run_queued(limit=1)
+        results = self.c.run_queued(max_tasks=1)
 
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0].status, "failed")

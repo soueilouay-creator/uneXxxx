@@ -17,6 +17,7 @@ class WorkflowApprovalPauseResumeTests(unittest.TestCase):
         self.request = {"objective": "prepare a protected stage before execution"}
         self.identity = {"request": self.request, "route": "test-fixture"}
         self.preparations, self.executions, self.completions, self.calls = [], [], [], []
+        self.consumed_bindings = {}
 
     def tearDown(self):
         self.temp.cleanup()
@@ -45,8 +46,13 @@ class WorkflowApprovalPauseResumeTests(unittest.TestCase):
 
         def execute(wf_id, stage_key, callback, args, intent, approval):
             self.executions.append((wf_id, stage_key, intent["execution_id"], intent["task_id"]))
-            if getattr(approval, "action_digest", None) != intent["action_digest"]:
-                raise PermissionError("approval digest does not match the prepared stage")
+            expected_binding = {
+                "workflow_id": wf_id, "stage_key": stage_key,
+                "execution_id": intent["execution_id"], "task_id": intent["task_id"],
+                "action_digest": intent["action_digest"], "permission": intent["permission"],
+            }
+            if self.consumed_bindings.get(approval.approval_id) != expected_binding:
+                raise PermissionError("approval binding does not match the prepared workflow stage")
             return callback(*args)
 
         def complete(wf_id, stage_key, intent, approval, value):
@@ -94,11 +100,16 @@ class WorkflowApprovalPauseResumeTests(unittest.TestCase):
             execute_stage_approval=execute, complete_stage_approval=complete,
         )
 
-    @staticmethod
-    def approval(digest):
+    def approval(self, pending):
+        approval_id = "github-pr:fixture:approved"
+        self.consumed_bindings[approval_id] = {
+            key: pending[key] for key in (
+                "workflow_id", "stage_key", "execution_id", "task_id", "action_digest", "permission"
+            )
+        }
         return SimpleNamespace(
-            approval_id="github-pr:fixture:approved", approver="trusted-reviewer",
-            approved_permissions=frozenset({"publish"}), action_digest=digest,
+            approval_id=approval_id, approver="trusted-reviewer",
+            approved_permissions=frozenset({"publish"}), action_digest=pending["action_digest"],
         )
 
     def test_missing_approval_pauses_before_stage_start_or_callback(self):
@@ -120,7 +131,7 @@ class WorkflowApprovalPauseResumeTests(unittest.TestCase):
         first = self.runner().run(self.request, workflow_id=self.workflow_id,
                                   checkpoint_identity=self.identity)
         pending = first.to_dict()["pending_approval"]
-        result = self.runner({"0001:plan": self.approval(pending["action_digest"])}).run(
+        result = self.runner({"0001:plan": self.approval(pending)}).run(
             self.request, workflow_id=self.workflow_id, checkpoint_identity=self.identity)
         self.assertEqual(result.status, "delivered")
         self.assertEqual(len(self.preparations), 1)
@@ -159,7 +170,7 @@ class WorkflowApprovalPauseResumeTests(unittest.TestCase):
         first = self.runner().run(self.request, workflow_id=self.workflow_id,
                                   checkpoint_identity=self.identity)
         pending = first.to_dict()["pending_approval"]
-        wrong = self.runner({"0001:plan": self.approval("b" * 64)}).run(
+        wrong = self.runner({"0001:plan": self.approval({**pending, "action_digest": "b" * 64})}).run(
             self.request, workflow_id=self.workflow_id, checkpoint_identity=self.identity)
         self.assertEqual(wrong.status, "blocked_execution")
         self.assertEqual(self.store.list_workflow_stages(self.workflow_id), [])

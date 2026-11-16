@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import threading
 import unittest
@@ -94,8 +95,9 @@ class PostgresWorkflowStageApprovalProofTests(unittest.TestCase):
         self.assertEqual(stage["state"], "enqueued")
         self.assertEqual(execution["state"], "enqueued")
         self.assertEqual(task["status"], "queued")
-        self.assertEqual(task["payload"]["execution_id"], self.execution_id)
-        self.assertEqual(task["payload"]["approval_reference"], "approval-recovery")
+        task_payload = json.loads(task["payload_json"])
+        self.assertEqual(task_payload["execution_id"], self.execution_id)
+        self.assertEqual(task_payload["approval_reference"], "approval-recovery")
 
         self.assertTrue(restarted.transition_approval_execution_intent(
             self.execution_id, "enqueued", "blocked", int(execution["revision"])

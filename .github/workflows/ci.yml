@@ -266,6 +266,12 @@ jobs:
               raise SystemExit(1)
           print(f"Verified SHA-256 inventory for {len(required)} changed files.")
           PY
+      - name: Install PostgreSQL logical backup and restore tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+          pg_dump --version
+          pg_restore --version
       - name: Run regression and security suite
         run: python -m unittest discover -s tests -v
       - name: Build single-process Docker image

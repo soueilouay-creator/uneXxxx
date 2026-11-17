@@ -85,3 +85,14 @@ A new isolated SQLite test starts a child Python process, allows the workflow ru
 - The original attempt token, stage status and checkpoint revision remain unchanged after the blocked retry.
 
 This proves fail-closed behavior across an actual process exit for the SQLite adapter. It does not prove PostgreSQL multi-process recovery, safe stale-stage reconciliation, task/approval linkage, or exactly-once external side effects. No production state is used; the test database is confined to a temporary directory.
+
+
+## Approval-bound pause/resume and PostgreSQL recovery proof — 2026-11-17
+
+- A protected workflow stage has a distinct awaiting_approval intent and is returned as waiting_approval before any stage callback is invoked or any stage checkpoint is marked started.
+- Resume is restricted to the same workflow ID, deterministic stage key, stage request hash, prepared execution/task IDs, action digest and permission. The consumed approval is immutably bound to that exact execution. A different workflow, stage, request or digest fails closed.
+- SQLite pause/resume tests verify the positive resume path and mismatch cases. The PostgreSQL suite verifies one revision-checked approval winner across 20 independent connections, process termination after a stage is durably marked started, and restart read-back of queued consumed approvals without automatic replay.
+- The release acceptance suite additionally exercises a PostgreSQL pause → approval consumption/binding → resume through a new store instance → completed workflow path. The run log records the exact CI SHA and outcome.
+- Recovery remains conservative: if a process exits after an external operation may have started but before its completion is durably reconciled, the stage is blocked for human review. This is not an exactly-once guarantee for external provider/tool side effects.
+
+See POSTGRES_BACKUP_RESTORE.md for the isolated logical backup/restore runbook and its explicit production limitations.

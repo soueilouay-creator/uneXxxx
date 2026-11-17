@@ -195,3 +195,13 @@ This file is append-only. Each entry records one bounded engineering increment a
 - **Verification:** CI for the implementation commit is pending. The Task 2 test-first run [43699560139](https://github.com/soueilouay-creator/uneXxxx/actions/runs/43699560139) is still in progress at the time of this commit; its eventual red/green outcome will be recorded separately, not inferred.
 - **Next:** inspect the test-first run's failure reasons, then run focused verifier/ledger tests and the complete CI suite on this implementation head. Fix only concrete failures. Do not begin Task 3 until Task 2 is green.
 - **Costs/preservation:** no new dependency, paid service, provider call, API credit, production migration or deployment. The PostgreSQL migration rehearsal remains ephemeral CI only; GitHub Actions billing impact is not visible.
+
+
+## Run 15 — 2026-11-17 — PostgreSQL approval resume and backup/restore acceptance
+
+- **Scope:** add a positive PostgreSQL workflow pause → approve → resume test using a new PostgresStateStore instance, plus a disposable PostgreSQL logical backup/restore drill. No production DSN, Neon branch, Render service, provider secret or user data is used.
+- **Approval recovery test:** the test prepares a workflow-stage execution intent, confirms the first run pauses before stage start/callback, consumes a one-use approval with an immutable execution/task/workflow/stage binding, applies revision-checked state transitions, resumes through a newly opened PostgreSQL store, and checks the execution, stage and workflow finish as completed. Existing independent-connection concurrency and abrupt-process-exit tests remain enabled.
+- **Backup/restore drill:** the test applies migrations 001–007 to a temporary source database, seeds task/event/memory/approval records, creates and lists a custom-format archive, restores it transactionally into a separate temporary database, then compares all public base-table row counts and exact representative read-backs. Cleanup drops only the uniquely named temporary CI databases.
+- **Runbook:** added docs/v8/POSTGRES_BACKUP_RESTORE.md. It requires a separate empty restore target, checksum validation and post-restore read-back; it forbids a destructive in-place --clean restore.
+- **Verification:** implementation commit CI is pending. Do not infer a pass until the runtime, renderer, backup/restore and Studio integration workflows report completed success on the new SHA.
+- **Production boundary:** no production backup, snapshot, retention schedule, off-site archive, Neon restore, Render change, merge-to-production or deployment is performed by the CI drill. Production backup scheduling, secure off-site retention and an approved recovery exercise remain operational release blockers.

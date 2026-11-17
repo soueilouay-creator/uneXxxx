@@ -269,5 +269,160 @@ print(json.dumps([{"status": result.status, "error": result.error} for result in
         )["state"], "blocked")
 
 
+    def test_postgres_pause_approval_resume_completes_same_prepared_stage(self):
+        workflow_id = "postgres-pause-resume-" + uuid.uuid4().hex
+        request = {"objective": "resume only the exact prepared PostgreSQL stage"}
+        identity = {"request": request, "provider_route": "postgres-fixture"}
+        permission = "publish"
+        preparations = []
+        calls = []
+        approval_id = "github-pr:fixture:" + uuid.uuid4().hex[:16]
+
+        def build_runner(store, approvals=None):
+            def prepare(wf_id, stage_key, stage_hash, args, requested_permission):
+                self.assertEqual((wf_id, stage_key, requested_permission),
+                                 (workflow_id, "0001:plan", permission))
+                execution_id = "execution:" + uuid.uuid4().hex
+                task_id = "task:" + uuid.uuid4().hex
+                action_digest = hashlib.sha256(
+                    (wf_id + stage_key + stage_hash + execution_id + task_id).encode("utf-8")
+                ).hexdigest()
+                prepared = store.create_approval_execution_intent(
+                    execution_id, task_id, stage_hash, action_digest, permission, wf_id, stage_key
+                )
+                self.assertEqual(prepared["state"], "prepared")
+                self.assertTrue(store.transition_approval_execution_intent(
+                    execution_id, "prepared", "awaiting_approval", 0
+                ))
+                preparations.append((execution_id, task_id, action_digest, stage_hash))
+                return {
+                    "execution_id": execution_id, "task_id": task_id,
+                    "action_digest": action_digest, "permission": permission,
+                    "action_details": {"workflow_id": wf_id, "stage_key": stage_key},
+                }
+
+            def execute_approved(wf_id, stage_key, callback, args, intent, approval):
+                binding = ApprovalExecutionBinding(
+                    execution_id=intent["execution_id"], task_id=intent["task_id"],
+                    workflow_id=wf_id, stage_key=stage_key,
+                )
+                ledger = PostgresApprovalLedger(self.dsn)
+                self.assertTrue(ledger.consume_once_bound(
+                    approval.approval_id, intent["action_digest"], permission, binding
+                ))
+                readback = ledger.get_consumed_binding(approval.approval_id)
+                self.assertIsNotNone(readback)
+                expected = {
+                    "action_digest": intent["action_digest"], "permission": permission,
+                    "execution_id": intent["execution_id"], "task_id": intent["task_id"],
+                    "workflow_id": wf_id, "stage_key": stage_key,
+                }
+                for key, value in expected.items():
+                    self.assertEqual(readback[key], value)
+                execution = store.get_approval_execution_intent(intent["execution_id"])
+                stage = store.get_workflow_stage_approval_intent(wf_id, stage_key)
+                self.assertEqual((execution["state"], execution["revision"]), ("awaiting_approval", 1))
+                self.assertEqual((stage["state"], stage["revision"]), ("awaiting_approval", 0))
+                self.assertTrue(store.transition_approval_execution_intent(
+                    intent["execution_id"], "awaiting_approval", "approved", 1
+                ))
+                self.assertTrue(store.transition_workflow_stage_approval_intent(
+                    wf_id, stage_key, "awaiting_approval", "approved", 0, approval.approval_id
+                ))
+                self.assertTrue(store.transition_approval_execution_intent(
+                    intent["execution_id"], "approved", "enqueued", 2
+                ))
+                self.assertTrue(store.transition_workflow_stage_approval_intent(
+                    wf_id, stage_key, "approved", "enqueued", 1
+                ))
+                return callback(*args)
+
+            def complete_approved(wf_id, stage_key, intent, approval, value):
+                execution = store.get_approval_execution_intent(intent["execution_id"])
+                stage = store.get_workflow_stage_approval_intent(wf_id, stage_key)
+                if (not execution or not stage or execution["state"] != "enqueued"
+                        or stage["state"] != "enqueued" or stage["approval_id"] != approval.approval_id
+                        or execution["task_id"] != intent["task_id"] or stage["task_id"] != intent["task_id"]):
+                    return False
+                execution_done = store.transition_approval_execution_intent(
+                    intent["execution_id"], "enqueued", "completed", int(execution["revision"])
+                )
+                stage_done = store.transition_workflow_stage_approval_intent(
+                    wf_id, stage_key, "enqueued", "completed", int(stage["revision"])
+                )
+                return bool(execution_done and stage_done)
+
+            def plan(req, feedback):
+                calls.append("plan")
+                return {"request": req, "text": "prepared plan"}
+
+            def execute_stage(plan_value):
+                calls.append("execute")
+                return {"text": "completed work"}
+
+            def verify(candidate, plan_value):
+                calls.append("verify")
+                return {"passed": True, "feedback": ""}
+
+            def improve(candidate, feedback):
+                calls.append("improve")
+                return candidate
+
+            def deliver(candidate):
+                calls.append("deliver")
+                return {"artifact": candidate}
+
+            def learn(record):
+                calls.append("learn")
+
+            return WorkflowRunner(
+                plan=plan, execute=execute_stage, verify=verify, improve=improve,
+                deliver=deliver, learn=learn, max_corrections=0, max_improvements=1,
+                checkpoint_store=store, stage_approval_permissions={"plan": permission},
+                stage_approvals=approvals or {}, prepare_stage_approval=prepare,
+                execute_stage_approval=execute_approved,
+                complete_stage_approval=complete_approved,
+            )
+
+        first = build_runner(self.store).run(
+            request, workflow_id=workflow_id, checkpoint_identity=identity
+        )
+        self.assertEqual(first.status, "waiting_approval")
+        self.assertEqual(calls, [])
+        pending = first.to_dict().get("pending_approval")
+        self.assertIsInstance(pending, dict)
+        self.assertEqual(self.store.list_workflow_stages(workflow_id), [])
+        self.assertEqual(
+            self.store.get_workflow_stage_approval_intent(workflow_id, "0001:plan")["state"],
+            "awaiting_approval",
+        )
+        self.assertEqual(len(preparations), 1)
+
+        approval = ApprovalContext(
+            approval_id=approval_id, approver="trusted-reviewer",
+            approved_permissions=frozenset({permission}),
+            rationale="Isolated PostgreSQL CI approval fixture",
+            action_digest=pending["action_digest"],
+        )
+        reopened = PostgresStateStore(self.dsn)
+        resumed = build_runner(reopened, {"0001:plan": approval}).run(
+            request, workflow_id=workflow_id, checkpoint_identity=identity
+        )
+        self.assertEqual(resumed.status, "delivered")
+        self.assertEqual(calls.count("plan"), 1)
+        self.assertEqual(len(preparations), 1)
+        final_stage = reopened.get_workflow_stage_approval_intent(workflow_id, "0001:plan")
+        final_execution = reopened.get_approval_execution_intent(preparations[0][0])
+        self.assertEqual(final_stage["state"], "completed")
+        self.assertEqual(final_stage["approval_id"], approval_id)
+        self.assertEqual(final_execution["state"], "completed")
+        self.assertEqual(reopened.get_workflow_checkpoint(workflow_id)["status"], "completed")
+        binding = PostgresApprovalLedger(self.dsn).get_consumed_binding(approval_id)
+        self.assertEqual(binding["task_id"], preparations[0][1])
+        self.assertEqual(binding["execution_id"], preparations[0][0])
+        self.assertEqual(binding["workflow_id"], workflow_id)
+        self.assertEqual(binding["stage_key"], "0001:plan")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

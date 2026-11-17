@@ -1,5 +1,5 @@
 from __future__ import annotations
-import hashlib, os, subprocess, tempfile, unittest, uuid
+import hashlib, os, shutil, subprocess, tempfile, unittest, uuid
 from pathlib import Path
 import psycopg
 from psycopg import sql

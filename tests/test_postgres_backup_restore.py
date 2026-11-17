@@ -39,7 +39,10 @@ def _run_pg_tool(tool: str, arguments: list[str], environment: dict[str, str],
     for name in forwarded:
         if environment.get(name) is not None:
             command.extend(["-e", name])
-    command.extend(["postgres:16", tool, *arguments])
+    postgres_version = os.environ.get("POSTGRES_TEST_VERSION", "16")
+    if not postgres_version.isdigit():
+        raise ValueError("POSTGRES_TEST_VERSION must be a numeric major version.")
+    command.extend([f"postgres:{postgres_version}", tool, *arguments])
     return subprocess.run(
         command, env=environment, capture_output=True, text=True,
         timeout=timeout, check=False,
@@ -53,7 +56,7 @@ class PostgreSQLBackupRestoreDrillTests(unittest.TestCase):
         if not cls.dsn:
             raise unittest.SkipTest("TEST_POSTGRES_DSN is not configured.")
         if not shutil.which("docker"):
-            raise AssertionError("Docker is required to run PostgreSQL 16-matched backup tools.")
+            raise AssertionError("Docker is required to run version-matched PostgreSQL backup tools.")
 
     def test_custom_archive_restores_migrations_and_all_public_table_rows(self):
         suffix = uuid.uuid4().hex[:16]

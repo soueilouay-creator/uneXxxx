@@ -36,10 +36,58 @@ jobs:
         run: python -m unittest tests.test_creator_end_to_end -v
       - name: Confirm renderer image identity
         run: docker image inspect unexpected-creator-renderer:locked --format '{{.Id}}'
+  postgres17-release-proof:
+    runs-on: ubuntu-latest
+    env:
+      TEST_POSTGRES_DSN: postgresql://unexpected:test-password@localhost:5432/unexpected_test
+      POSTGRES_TEST_VERSION: "17"
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: unexpected
+          POSTGRES_PASSWORD: test-password
+          POSTGRES_DB: unexpected_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U unexpected -d unexpected_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - name: Install PostgreSQL 17 proof dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
+      - name: Apply additive PostgreSQL migrations
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import psycopg
+
+          with psycopg.connect(os.environ["TEST_POSTGRES_DSN"], autocommit=True) as connection:
+              for migration in sorted(Path("migrations").glob("*.sql")):
+                  connection.execute(migration.read_text(encoding="utf-8"), prepare=False)
+                  print(f"Applied {migration}")
+          PY
+      - name: Verify PostgreSQL 17 logical backup tools
+        run: |
+          docker run --rm postgres:17 pg_dump --version
+          docker run --rm postgres:17 pg_restore --version
+      - name: Prove PostgreSQL 17 approval concurrency, process recovery, pause/resume and backup/restore
+        run: python -m unittest tests.test_postgres_workflow_stage_approval tests.test_postgres_backup_restore -v
+
   runtime-tests:
     runs-on: ubuntu-latest
     env:
       TEST_POSTGRES_DSN: postgresql://unexpected:test-password@localhost:5432/unexpected_test
+      POSTGRES_TEST_VERSION: "16"
     services:
       postgres:
         image: postgres:16
@@ -266,10 +314,10 @@ jobs:
               raise SystemExit(1)
           print(f"Verified SHA-256 inventory for {len(required)} changed files.")
           PY
-      - name: Verify PostgreSQL 16 logical backup tools
+      - name: Verify PostgreSQL ${POSTGRES_TEST_VERSION} logical backup tools
         run: |
-          docker run --rm postgres:16 pg_dump --version
-          docker run --rm postgres:16 pg_restore --version
+          docker run --rm postgres:${POSTGRES_TEST_VERSION} pg_dump --version
+          docker run --rm postgres:${POSTGRES_TEST_VERSION} pg_restore --version
       - name: Run regression and security suite
         run: python -m unittest discover -s tests -v
       - name: Build single-process Docker image

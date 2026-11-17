@@ -30,6 +30,7 @@ def _run_pg_tool(tool: str, arguments: list[str], environment: dict[str, str],
     # Match the server's major version: newer pg_dump adds SET statements that
     # older servers may not recognize when restoring a custom archive.
     command = ["docker", "run", "--rm", "--network", "host",
+               "--user", f"{os.getuid()}:{os.getgid()}",
                "-v", f"{directory}:/backup"]
     forwarded = (
         "PGHOST", "PGHOSTADDR", "PGPORT", "PGUSER", "PGPASSWORD", "PGSSLMODE",

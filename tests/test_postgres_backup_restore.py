@@ -1,5 +1,5 @@
 from __future__ import annotations
-import hashlib, os, shutil, subprocess, tempfile, unittest, uuid
+import hashlib, os, subprocess, tempfile, unittest, uuid
 from pathlib import Path
 import psycopg
 from psycopg import sql
@@ -25,14 +25,34 @@ def _libpq_env(dsn: str) -> tuple[dict[str, str], str]:
         raise ValueError("The PostgreSQL test DSN must name a database.")
     return environment, str(database)
 
+def _run_pg_tool(tool: str, arguments: list[str], environment: dict[str, str],
+                  directory: str, timeout: int) -> subprocess.CompletedProcess:
+    # Match the server's major version: newer pg_dump adds SET statements that
+    # older servers may not recognize when restoring a custom archive.
+    command = ["docker", "run", "--rm", "--network", "host",
+               "-v", f"{directory}:/backup"]
+    forwarded = (
+        "PGHOST", "PGHOSTADDR", "PGPORT", "PGUSER", "PGPASSWORD", "PGSSLMODE",
+        "PGSSLROOTCERT", "PGSSLCERT", "PGSSLKEY", "PGCONNECT_TIMEOUT", "PGAPPNAME",
+    )
+    for name in forwarded:
+        if environment.get(name) is not None:
+            command.extend(["-e", name])
+    command.extend(["postgres:16", tool, *arguments])
+    return subprocess.run(
+        command, env=environment, capture_output=True, text=True,
+        timeout=timeout, check=False,
+    )
+
+
 class PostgreSQLBackupRestoreDrillTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.dsn = os.environ.get("TEST_POSTGRES_DSN")
         if not cls.dsn:
             raise unittest.SkipTest("TEST_POSTGRES_DSN is not configured.")
-        if not shutil.which("pg_dump") or not shutil.which("pg_restore"):
-            raise AssertionError("CI must install pg_dump and pg_restore before this drill.")
+        if not shutil.which("docker"):
+            raise AssertionError("Docker is required to run PostgreSQL 16-matched backup tools.")
 
     def test_custom_archive_restores_migrations_and_all_public_table_rows(self):
         suffix = uuid.uuid4().hex[:16]
@@ -82,19 +102,19 @@ class PostgreSQLBackupRestoreDrillTests(unittest.TestCase):
                     )
 
                 env, source_db = _libpq_env(source_dsn)
-                dumped = subprocess.run(
-                    ["pg_dump", "--format=custom", "--no-owner", "--no-acl",
-                     "--dbname", source_db, "--file", str(archive)],
-                    env=env, capture_output=True, text=True, timeout=90, check=False,
+                dumped = _run_pg_tool(
+                    "pg_dump",
+                    ["--format=custom", "--no-owner", "--no-acl",
+                     "--dbname", source_db, "--file", "/backup/runtime.dump"],
+                    env, directory, 90,
                 )
                 self.assertEqual(dumped.returncode, 0, msg=dumped.stderr[-3000:])
                 self.assertTrue(archive.is_file())
                 self.assertGreater(archive.stat().st_size, 0)
                 self.assertEqual(len(hashlib.sha256(archive.read_bytes()).hexdigest()), 64)
                 os.chmod(archive, 0o600)
-                listed = subprocess.run(
-                    ["pg_restore", "--list", str(archive)],
-                    env=env, capture_output=True, text=True, timeout=30, check=False,
+                listed = _run_pg_tool(
+                    "pg_restore", ["--list", "/backup/runtime.dump"], env, directory, 30,
                 )
                 self.assertEqual(listed.returncode, 0, msg=listed.stderr[-3000:])
                 self.assertIn("TABLE DATA", listed.stdout)
@@ -103,10 +123,11 @@ class PostgreSQLBackupRestoreDrillTests(unittest.TestCase):
                     admin.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(target_name)))
                     created_databases.append(target_name)
                 restore_env, target_db = _libpq_env(target_dsn)
-                restored = subprocess.run(
-                    ["pg_restore", "--exit-on-error", "--single-transaction",
-                     "--no-owner", "--no-acl", "--dbname", target_db, str(archive)],
-                    env=restore_env, capture_output=True, text=True, timeout=120, check=False,
+                restored = _run_pg_tool(
+                    "pg_restore",
+                    ["--exit-on-error", "--single-transaction", "--no-owner", "--no-acl",
+                     "--dbname", target_db, "/backup/runtime.dump"],
+                    restore_env, directory, 120,
                 )
                 self.assertEqual(restored.returncode, 0, msg=restored.stderr[-5000:])
 

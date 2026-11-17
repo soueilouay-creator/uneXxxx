@@ -160,9 +160,9 @@ class PostgreSQLBackupRestoreDrillTests(unittest.TestCase):
                         ("orchestrator", "backup-restore-probe")).fetchone(),
                         ('{"memory":"retained"}',))
                     self.assertEqual(restored_db.execute(
-                        "SELECT marker,payload::text FROM backup_restore_probe WHERE probe_id=%s",
-                        ("restore-readback",)).fetchone(),
-                        ("v8-restore-ok", '{"migrations": 7, "preserved": true}'))
+                        "SELECT marker,payload = %s::jsonb FROM backup_restore_probe WHERE probe_id=%s",
+                        ('{"migrations": 7, "preserved": true}', "restore-readback")).fetchone(),
+                        ("v8-restore-ok", True))
                     self.assertEqual(restored_db.execute(
                         "SELECT action_digest FROM consumed_approvals WHERE approval_id=%s",
                         ("backup-restore-approval",)).fetchone(), ("a" * 64,))

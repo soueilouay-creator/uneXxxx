@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+from .models import ApprovalExecutionBinding
 import base64
 import hashlib
 import json
@@ -15,10 +16,19 @@ import time
 
 
 class ApprovalVerifier(Protocol):
-    """Host trust boundary; implementations must authenticate the approver and approval record."""
+    """Host trust boundary; implementations authenticate and consume bound approvals."""
 
     def verify(self, approval: Any, permission: str, action_digest: str) -> bool:
-        """Return true only for a trusted, unexpired approval bound to this action and permission."""
+        """Legacy unbound verifier path; not accepted for prepared privileged invocation."""
+        ...
+
+    def verify_bound(self, approval: Any, permission: str, action_digest: str,
+                     binding: ApprovalExecutionBinding) -> bool:
+        """Verify and consume an approval for exactly one immutable execution binding."""
+        ...
+
+    def get_consumed_binding(self, approval_id: str) -> dict[str, Any] | None:
+        """Read back the exact durable binding for an already consumed approval."""
         ...
 
 
@@ -26,6 +36,13 @@ class ApprovalLedger(Protocol):
     """Durable one-use ledger for verified approval consumption."""
 
     def consume_once(self, approval_id: str, action_digest: str) -> bool:
+        ...
+
+    def consume_once_bound(self, approval_id: str, action_digest: str,
+                           permission: str, binding: ApprovalExecutionBinding) -> bool:
+        ...
+
+    def get_consumed_binding(self, approval_id: str) -> dict[str, Any] | None:
         ...
 
 
@@ -142,17 +159,38 @@ class GitHubPullRequestApprovalVerifier:
             raise ValueError('Approval request file must contain a JSON object.')
         return data
 
+    @staticmethod
+    def _ensure_sqlite_approval_ledger(connection: sqlite3.Connection) -> None:
+        connection.execute('''CREATE TABLE IF NOT EXISTS consumed_approvals (
+            approval_id TEXT PRIMARY KEY,
+            action_digest TEXT NOT NULL,
+            consumed_at REAL NOT NULL
+        )''')
+        connection.execute('''CREATE TABLE IF NOT EXISTS approval_execution_bindings (
+            approval_id TEXT PRIMARY KEY
+                REFERENCES consumed_approvals(approval_id) ON DELETE RESTRICT,
+            action_digest TEXT NOT NULL CHECK(length(action_digest)=64),
+            permission TEXT NOT NULL CHECK(length(trim(permission))>0),
+            execution_id TEXT NOT NULL UNIQUE,
+            task_id TEXT NOT NULL UNIQUE,
+            workflow_id TEXT,
+            stage_key TEXT,
+            consumed_at REAL NOT NULL,
+            CHECK((workflow_id IS NULL)=(stage_key IS NULL)),
+            CHECK(workflow_id IS NULL OR length(trim(workflow_id))>0),
+            CHECK(stage_key IS NULL OR length(trim(stage_key))>0)
+        )''')
+        connection.execute('''CREATE INDEX IF NOT EXISTS idx_approval_execution_bindings_task
+            ON approval_execution_bindings(task_id)''')
+
     def _consume_once(self, approval_id: str, action_digest: str) -> bool:
         if self.ledger is not None:
-            return self.ledger.consume_once(approval_id, action_digest)
+            return bool(self.ledger.consume_once(approval_id, action_digest))
         self.ledger_path.parent.mkdir(parents=True, exist_ok=True)
         with sqlite3.connect(self.ledger_path, timeout=5.0, isolation_level=None) as connection:
             connection.execute('PRAGMA busy_timeout=5000')
-            connection.execute('''CREATE TABLE IF NOT EXISTS consumed_approvals (
-                approval_id TEXT PRIMARY KEY,
-                action_digest TEXT NOT NULL,
-                consumed_at REAL NOT NULL
-            )''')
+            connection.execute('PRAGMA foreign_keys=ON')
+            self._ensure_sqlite_approval_ledger(connection)
             connection.execute('BEGIN IMMEDIATE')
             try:
                 connection.execute(
@@ -168,7 +206,90 @@ class GitHubPullRequestApprovalVerifier:
                 connection.execute('ROLLBACK')
                 raise
 
+    def _consume_once_bound(self, approval_id: str, action_digest: str,
+                            permission: str, binding: ApprovalExecutionBinding) -> bool:
+        if (not isinstance(approval_id, str) or not approval_id.strip()
+                or not isinstance(action_digest, str) or not self.DIGEST.fullmatch(action_digest)
+                or not isinstance(permission, str) or not permission.strip()
+                or not isinstance(binding, ApprovalExecutionBinding)):
+            return False
+        if self.ledger is not None:
+            consumer = getattr(self.ledger, 'consume_once_bound', None)
+            if not callable(consumer):
+                return False
+            return bool(consumer(approval_id, action_digest, permission, binding))
+
+        self.ledger_path.parent.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(self.ledger_path, timeout=5.0, isolation_level=None) as connection:
+            connection.execute('PRAGMA busy_timeout=5000')
+            connection.execute('PRAGMA foreign_keys=ON')
+            self._ensure_sqlite_approval_ledger(connection)
+            now = time.time()
+            connection.execute('BEGIN IMMEDIATE')
+            try:
+                consumed = connection.execute(
+                    'INSERT INTO consumed_approvals(approval_id,action_digest,consumed_at) '
+                    'VALUES(?,?,?) ON CONFLICT(approval_id) DO NOTHING',
+                    (approval_id, action_digest, now),
+                )
+                if consumed.rowcount != 1:
+                    connection.execute('ROLLBACK')
+                    return False
+                inserted = connection.execute(
+                    'INSERT INTO approval_execution_bindings('
+                    'approval_id,action_digest,permission,execution_id,task_id,workflow_id,stage_key,consumed_at'
+                    ') VALUES(?,?,?,?,?,?,?,?)',
+                    (approval_id, action_digest, permission, binding.execution_id, binding.task_id,
+                     binding.workflow_id, binding.stage_key, now),
+                )
+                if inserted.rowcount != 1:
+                    connection.execute('ROLLBACK')
+                    return False
+                connection.execute('COMMIT')
+                return True
+            except sqlite3.IntegrityError:
+                connection.execute('ROLLBACK')
+                return False
+            except Exception:
+                connection.execute('ROLLBACK')
+                raise
+
+    def get_consumed_binding(self, approval_id: str) -> dict[str, Any] | None:
+        if not isinstance(approval_id, str) or not approval_id.strip():
+            return None
+        if self.ledger is not None:
+            reader = getattr(self.ledger, 'get_consumed_binding', None)
+            if not callable(reader):
+                return None
+            try:
+                row = reader(approval_id)
+                return dict(row) if row is not None else None
+            except Exception:
+                return None
+        self.ledger_path.parent.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(self.ledger_path, timeout=5.0, isolation_level=None) as connection:
+            connection.row_factory = sqlite3.Row
+            connection.execute('PRAGMA busy_timeout=5000')
+            connection.execute('PRAGMA foreign_keys=ON')
+            self._ensure_sqlite_approval_ledger(connection)
+            row = connection.execute(
+                'SELECT approval_id,action_digest,permission,execution_id,task_id,workflow_id,stage_key,consumed_at '
+                'FROM approval_execution_bindings WHERE approval_id=?',
+                (approval_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
     def verify(self, approval: Any, permission: str, action_digest: str) -> bool:
+        return self._verify(approval, permission, action_digest, binding=None)
+
+    def verify_bound(self, approval: Any, permission: str, action_digest: str,
+                     binding: ApprovalExecutionBinding) -> bool:
+        if not isinstance(binding, ApprovalExecutionBinding):
+            return False
+        return self._verify(approval, permission, action_digest, binding=binding)
+
+    def _verify(self, approval: Any, permission: str, action_digest: str,
+                *, binding: ApprovalExecutionBinding | None) -> bool:
         try:
             if (not self.token or not self.trusted_reviewers
                     or approval is None
@@ -216,6 +337,9 @@ class GitHubPullRequestApprovalVerifier:
                     or canonical_action_digest(request_doc['action_details']) != action_digest
                     or request_doc.get('action_digest') != action_digest):
                 return False
+            if (binding is not None
+                    and request_doc['action_details'].get('execution_binding') != binding.to_dict()):
+                return False
             requested_by = str(request_doc.get('requested_by', '')).strip().lower()
             # Requests are issued only by the configured repository owner. The
             # approving admin must be a different identity (separation of duties).
@@ -260,7 +384,10 @@ class GitHubPullRequestApprovalVerifier:
             if not isinstance(permission_data, dict) or permission_data.get('permission') != 'admin':
                 return False
 
-            # A valid GitHub approval is single-use. The insert is atomic across workers.
+            # Bound approval consumption is atomic with its immutable execution identity.
+            if binding is not None:
+                return self._consume_once_bound(approval_id, action_digest, permission, binding)
+            # Legacy unbound approvals retain their existing one-use behavior.
             return self._consume_once(approval_id, action_digest)
         except Exception:
             # Any malformed response, API outage, parse error, or ledger failure denies access.

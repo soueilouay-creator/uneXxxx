@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from unexpected_runtime.approvals import GitHubPullRequestApprovalVerifier, canonical_action_digest
-from unexpected_runtime.models import ApprovalContext
+from unexpected_runtime.models import ApprovalContext, ApprovalExecutionBinding
 from unexpected_runtime.coordinator import Coordinator
 from unexpected_runtime.providers import DeterministicMockProvider
 
@@ -30,13 +30,13 @@ def iso(delta: timedelta = timedelta(0)) -> str:
 class FakeGitHub:
     def __init__(self, *, state="open", review_state="APPROVED", review_commit=HEAD_SHA,
                  reviewer=REVIEWER, requested_by=REQUESTER, permission="admin", body_digest=DIGEST,
-                 base_ref="main", head_repo=REPOSITORY, response_override=None):
+                 base_ref="main", head_repo=REPOSITORY, response_override=None, action_details=ACTION_DETAILS):
         request_document = {
             "schema": "uneXpected.approval-request/v1",
             "proposal_id": "proposal-001",
             "repository": REPOSITORY,
             "permission": "repo_write",
-            "action_details": ACTION_DETAILS,
+            "action_details": action_details,
             "action_digest": body_digest,
             "requested_by": requested_by,
             "created_at": iso(timedelta(minutes=-5)),
@@ -158,6 +158,30 @@ class GitHubApprovalVerifierTests(unittest.TestCase):
             verifier = self.make_verifier(directory, fake)
             altered_context = context(digest=doc["action_digest"])
             self.assertFalse(verifier.verify(altered_context, "repo_write", doc["action_digest"]))
+
+    def test_bound_verification_requires_exact_execution_and_workflow_stage_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            binding = ApprovalExecutionBinding("execution-1", "task-1", "workflow-1", "0002:execute")
+            details = {
+                "action": "agent.invoke",
+                "required_permissions": ["repo_write"],
+                "execution_binding": binding.to_dict(),
+            }
+            digest = canonical_action_digest(details)
+            verifier = self.make_verifier(directory, FakeGitHub(body_digest=digest, action_details=details))
+            approved = context(digest=digest)
+            self.assertTrue(verifier.verify_bound(approved, "repo_write", digest, binding))
+        with tempfile.TemporaryDirectory() as directory:
+            binding = ApprovalExecutionBinding("execution-1", "task-1", "workflow-1", "0002:execute")
+            changed = ApprovalExecutionBinding("execution-1", "task-1", "workflow-2", "0002:execute")
+            details = {
+                "action": "agent.invoke",
+                "required_permissions": ["repo_write"],
+                "execution_binding": binding.to_dict(),
+            }
+            digest = canonical_action_digest(details)
+            verifier = self.make_verifier(directory, FakeGitHub(body_digest=digest, action_details=details))
+            self.assertFalse(verifier.verify_bound(context(digest=digest), "repo_write", digest, changed))
 
     def test_denies_changed_request_digest(self):
         with tempfile.TemporaryDirectory() as directory:

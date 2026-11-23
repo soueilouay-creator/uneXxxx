@@ -26,7 +26,7 @@ class RowsCursor:
 
 
 class FakePostgres:
-    def __init__(self, version=2):
+    def __init__(self, version=7):
         self.version = version
         self.lock = threading.Lock()
         self.claims = {}
@@ -95,20 +95,23 @@ class FakeConnection:
 
 
 class PostgresStorageTests(unittest.TestCase):
-    def test_requires_v8_schema_migration_and_does_not_create_tables(self):
-        db = FakePostgres(version=1)
-        with self.assertRaises(PostgresStorageError):
-            PostgresStateStore("postgresql://unit.test/db", connect_factory=db.connect)
-        self.assertEqual(db.claims, {})
+    def test_requires_complete_v8_schema_and_does_not_create_tables(self):
+        for version in range(1, 7):
+            with self.subTest(version=version):
+                db = FakePostgres(version=version)
+                with self.assertRaisesRegex(PostgresStorageError, "schema version 7 is required"):
+                    PostgresStateStore("postgresql://unit.test/db", connect_factory=db.connect)
+                self.assertEqual(db.claims, {})
+                self.assertEqual(db.closed, 1)
 
     def test_checks_database_readiness(self):
-        db = FakePostgres(version=2)
+        db = FakePostgres(version=7)
         store = PostgresStateStore("postgresql://unit.test/db", connect_factory=db.connect)
         self.assertTrue(store.check_health())
         self.assertEqual(store.backend, "postgres")
 
     def test_task_event_reads_are_task_scoped_ordered_and_cursor_bounded(self):
-        db = FakePostgres(version=2)
+        db = FakePostgres(version=7)
         db.events = [
             {"event_id": 4, "ts": 1.0, "task_id": "task-1", "agent_id": "role",
              "event_type": "first", "payload_json": "{}"},
@@ -127,7 +130,7 @@ class PostgresStorageTests(unittest.TestCase):
             store.list_task_events("task-1", after_event_id=-1, limit=10)
 
     def test_concurrent_idempotency_claims_have_one_owner(self):
-        db = FakePostgres(version=2)
+        db = FakePostgres(version=7)
         store = PostgresStateStore("postgresql://unit.test/db", connect_factory=db.connect)
         with ThreadPoolExecutor(max_workers=12) as pool:
             results = list(pool.map(
@@ -138,7 +141,7 @@ class PostgresStorageTests(unittest.TestCase):
         self.assertEqual(sum(result["state"] == "running" for result in results), 23)
 
     def test_completed_claim_replays_exact_result_and_rejects_changed_payload(self):
-        db = FakePostgres(version=2)
+        db = FakePostgres(version=7)
         store = PostgresStateStore("postgresql://unit.test/db", connect_factory=db.connect)
         store.claim_idempotency("key", "a" * 64, "task-1")
         result = {"task_id": "task-1", "status": "completed", "output": "verified"}

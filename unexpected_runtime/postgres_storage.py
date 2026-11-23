@@ -35,8 +35,8 @@ class PostgresStateStore(PostgresIdempotencyMixin):
                     row = connection.execute(
                         "SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1"
                     ).fetchone()
-                    if not row or int(row["version"]) < 2:
-                        raise PostgresStorageError("PostgreSQL v8 migrations are not initialized; migration 002 is required.")
+                    if not row or int(row["version"]) < 7:
+                        raise PostgresStorageError("PostgreSQL v8 schema version 7 is required; apply migrations 002 through 007 in order.")
             except PostgresStorageError:
                 raise
             except Exception as exc:

@@ -64,15 +64,19 @@ A configured key is not a verified provider. Use the bounded **Test connection**
 
 Set `UNEXPECTED_STORAGE_BACKEND=postgres` and supply `DATABASE_URL` in the host secret manager. The app refuses to start in PostgreSQL mode if the URL or required v8 schema is unavailable; it never silently falls back to ephemeral SQLite.
 
-Apply migrations in order from an isolated database branch before configuring the service:
+The current runtime requires `schema_migrations.version >= 7`. `PostgresStateStore` performs a read-only schema-version check at startup; it does not create, repair, or upgrade PostgreSQL tables.
 
-1. Existing schema version 1.
-2. `migrations/002_idempotency_claims.sql`.
+Apply migrations in order on an isolated disposable PostgreSQL database before configuring the service:
 
-For a fresh PostgreSQL database, apply `migrations/001_initial.sql` followed by `migrations/002_idempotency_claims.sql`. For an existing schema-v1 database, first compare it against migration 001, then apply only migration 002. The v8 adapter refuses to start before schema version 2. The included Render Blueprint creates one free web service only; it does not create a database.
+- **Fresh database:** apply `migrations/001_initial.sql` through `migrations/007_workflow_stage_approval_intents.sql` in numeric order.
+- **Existing schema-v1 database:** first verify that its existing schema matches migration 001, then apply migrations 002 through 007 in numeric order. Do not re-run migration 001 against existing data.
+- **Existing schema versions 2–6:** apply only the missing next migrations in numeric order after reviewing the schema and a current backup. Do not skip a migration.
 
-The current Neon Free plan has no scheduled backup snapshots. Verify the current limits, backup/export destination, and restore process before relying on it for durable production records.
+The versioned additions are: 002 idempotency claims; 003 Creator Studio metadata; 004 workflow checkpoints; 005 approval execution intents; 006 immutable approval-to-execution bindings (legacy consumed approvals remain unbound); and 007 workflow-stage approval intents. Verify the newest migration row is version 7 and run the PostgreSQL regression and separate-target backup/restore checks before any production cutover.
 
+Do not apply these migrations to the populated production database as part of this code change. A production migration, backup configuration, restore exercise or service restart requires a separately approved operational window.
+
+The included Render Blueprint creates one free web service only; it does not create a database. The current Neon Free plan has no scheduled backup snapshots. Verify the current limits, backup/export destination, and restore process before relying on it for durable production records.
 ## Verified Skill bundles
 
 The authenticated command center exposes `GET /v1/skills` for metadata-only Skill discovery. `POST /v1/invoke` accepts an optional `skill_ids` array (up to four unique IDs) for explicit user-invoked Skills. Task records persist the selected IDs, and the idempotency/approval action digests bind the selection.

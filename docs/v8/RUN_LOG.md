@@ -205,3 +205,45 @@ This file is append-only. Each entry records one bounded engineering increment a
 - **Runbook:** added docs/v8/POSTGRES_BACKUP_RESTORE.md. It requires a separate empty restore target, checksum validation and post-restore read-back; it forbids a destructive in-place --clean restore.
 - **Verification:** implementation commit CI is pending. Do not infer a pass until the runtime, renderer, backup/restore and Studio integration workflows report completed success on the new SHA.
 - **Production boundary:** no production backup, snapshot, retention schedule, off-site archive, Neon restore, Render change, merge-to-production or deployment is performed by the CI drill. Production backup scheduling, secure off-site retention and an approved recovery exercise remain operational release blockers.
+
+## Run 16 — 2026-11-26 — read-only workflow recovery inspection
+
+**Phase:** Phase 3, durable execution and recovery operator visibility.
+
+**Baseline and rollback**
+- Core main HEAD before this run: 2828fe281b60ea0a343b24973b411bbad650e93e.
+- Created backup branch backup/v8-core-pre-recovery-inspection-20261126 at that exact main commit.
+- Feature branch: upgrade/v8-recovery-inspection-20261126.
+- Draft PR: https://github.com/soueilouay-creator/uneXxxx/pull/19.
+- Implementation/test/docs head verified by CI: adf2520580358f4be3fd0be358d600e2f7ba88a6.
+
+**Completed**
+- Added unexpected_runtime/recovery_inspection.py, a read-only and sanitized workflow recovery inspector.
+- Added five SQLite tests and two PostgreSQL tests for missing checkpoints, ambiguous started stages, non-mutating inspection, missing linked-task evidence, pending approval bindings and input validation.
+- Added docs/v8/WORKFLOW_RECOVERY_INSPECTION.md with operator handling boundaries and requirements for a future write-capable reconciliation operation.
+- Updated FILE_INVENTORY_SHA256.txt; the final implementation head passed the repository inventory check.
+- No package, service, migration, API route or UI change was added.
+
+**Verification**
+- CI run 45745387633 on implementation head adf2520580358f4be3fd0be358d600e2f7ba88a6.
+- Runtime-tests job passed: python -m unittest discover -s tests -v; 450 tests passed, including all seven new recovery-inspection tests. Compileall, JavaScript syntax, workflow YAML/Bash validation, additive migration preservation, source inventory verification, Docker build and authenticated container smoke test also passed.
+- PostgreSQL 17 release-proof job passed: six tests covering independent-connection approval concurrency, abrupt-process recovery, pause/resume, consumed-approval replay protection and logical backup/restore.
+- Renderer end-to-end job was still running at the time of this log entry; it is not counted as passed.
+
+**Live infrastructure inspection (read-only)**
+- Render workspace My Workspace: unexpected-v8-command-center is on main with auto-deploy off and the Free plan; unexpected-ai-studio is on main with auto-deploy on and the Free plan. No Render PostgreSQL instances were listed.
+- Neon organization plan is Free. Project unexpected-v8-unified (tiny-glade-03545028) has ten branches; all ten, including the default main branch, are archived. The default branch logical size is 31,432,704 bytes.
+- One manual snapshot exists: uneXpected-pre-cutover-main-2026-11-07, created 2026-11-07T08:50:13Z. The default branch snapshot schedule is empty. Project history retention is 21,600 seconds. The Neon consumption endpoint is restricted to paid plans, so account-level usage/cost metrics were not available.
+- No Neon data tables were queried. No branch was unarchived/restored/created, no snapshot was restored, no database or service setting was changed, and no credentials were accessed.
+
+**Preservation and cost**
+- The feature branch is seven commits ahead and zero behind core main; four changed paths, three added files plus the source inventory update, zero deleted paths.
+- The backup branch still points to the pre-run main SHA. No existing application source, task, memory, approval, workflow, project or database record was modified.
+- No new dependency, paid infrastructure, provider API call or generation credit was used. GitHub Actions ran the repository CI; account-level billing is not visible through the available connector.
+- The remote GitHub branch diff was verified. A local working-tree status was not exposed by the connected GitHub interface.
+
+**Blocked / next**
+- The hosted Neon default branch is archived and no automatic snapshot schedule exists. Production database connectivity and production backup/restore remain unverified; do not unarchive or restore without a separately approved, backed-up recovery plan.
+- This helper is diagnostic only. There is still no supported, revision-checked operator transition to reconcile an ambiguous started stage.
+- Next: finish the renderer CI result, then design an append-only reconciliation audit record and compare-and-set transition with SQLite/PostgreSQL parity tests. Do not apply a production migration until an active authorized database and independent backup/read-back are verified.
+

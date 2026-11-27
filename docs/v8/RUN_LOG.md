@@ -291,7 +291,7 @@ This file is append-only. Each entry records one bounded engineering increment a
 - PostgreSQL 17 applied migrations 001–008 successfully. All four initial PostgreSQL reconciliation tests and all seven SQLite reconciliation tests passed.
 - The existing PostgreSQL backup/restore proof failed because it hard-coded schema version 7 and a fixture payload with migration count 7. This was a stale test expectation caused by the additive migration, not a migration or restore failure.
 - Corrected tests/test_postgres_backup_restore.py to derive the expected version from the checked-in migration filenames, added PostgreSQL audit-insert failure rollback coverage, and made the documentation explicit about both-backend rollback testing.
-- The corrected exact-head CI run remains pending; no release pass is claimed until all jobs succeed.
+- The corrected exact-head CI run was pending at the time of this note; final verification closure is recorded below.
 
 
 **Second CI correction note**
@@ -299,3 +299,18 @@ This file is append-only. Each entry records one bounded engineering increment a
 - PostgreSQL 17 migration application and the existing custom-archive backup/restore read-back passed. The five existing PostgreSQL approval/recovery tests passed, as did four of the five PostgreSQL reconciliation tests and all seven SQLite reconciliation tests.
 - The additional PostgreSQL rollback-injection test failed before exercising application code: the test fixture's dollar-quoted PL/pgSQL body was altered by the psycopg query parser, producing invalid SQL.
 - Replaced that fixture body with a single-quoted SQL function body. The implementation transaction code was unchanged. The corrected exact-head CI run is pending.
+
+
+## Run 17 verification closure — implementation commit 9f013b43e096423c69d0ea6879032417ce668d06
+
+**GitHub Actions:** Run #45927932067 — exact implementation head 9f013b43e096423c69d0ea6879032417ce668d06; all three jobs completed with conclusion success (exit code 0).
+
+- **Runtime regression/security:** command: python -m unittest discover -s tests -v; 462 tests, 3 skipped, result OK; exit code 0. The same job passed runtime compilation, JavaScript syntax checks, workflow YAML/Bash checks, migration-preservation checks, source integrity, changed-file SHA-256 inventory verification and docker build --pull -t unexpected-v8-command-center:ci .
+- **PostgreSQL 17 release proof:** command: python -m unittest tests.test_postgres_workflow_stage_approval tests.test_postgres_backup_restore tests.test_workflow_reconciliation -v; 18 tests, result OK; exit code 0. Migrations 001–008 applied; independent-connection concurrency, approval/recovery, append-only audit, injected audit-insert rollback and custom-archive backup/restore read-back passed.
+- **Renderer E2E:** docker build --pull -f renderer/Dockerfile -t unexpected-creator-renderer:locked . succeeded. Command: python -m unittest tests.test_creator_end_to_end -v; 2 tests, result OK; exit code 0. Both real MP4 packaging/QA tests passed with worker networking disabled. Renderer image digest: sha256:54629777e6f6f972c9fa8a8d6ad43ca2f33927e36a2f152b5ee77cddd77e5b10.
+
+**Run 17 outcome:** the audited manual-review block, SQLite/PostgreSQL parity, stale-revision rejection, one-winner concurrency, idempotency, append-only triggers, transaction rollback and read-back are verified in CI. The implementation is still a draft PR and is not deployed.
+
+**Outstanding V8 release blockers remain:** no active hosted PostgreSQL branch/Render Postgres or verified production backup/restore path; no live OpenAI/Anthropic/third-provider compatibility proof; authenticated operator API/UI not wired; full MCP threat/security gate, model/tool observability and evaluation, engineering sandbox, and end-to-end product-data preservation audit remain incomplete.
+
+**Next increment:** add an authenticated, read-only operator view for workflow reconciliation events only after verifying the actual hosted runtime transport and identity boundary. Keep state-changing reconciliation controls unavailable until explicit human approval and worker-isolation evidence are enforceable.

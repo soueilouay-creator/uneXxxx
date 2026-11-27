@@ -267,7 +267,7 @@ class PostgresWorkflowReconciliationTests(unittest.TestCase):
         with self.store._session() as connection:
             connection.execute(
                 f"CREATE FUNCTION {function_name}() RETURNS trigger LANGUAGE plpgsql "
-                "AS $ BEGIN RAISE EXCEPTION 'synthetic audit insert failure'; END; $"
+                "AS 'BEGIN RAISE EXCEPTION ''synthetic audit insert failure''; END;'"
             )
             connection.execute(
                 f"CREATE TRIGGER {trigger_name} BEFORE INSERT ON workflow_reconciliation_events "

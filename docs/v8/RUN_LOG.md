@@ -292,3 +292,10 @@ This file is append-only. Each entry records one bounded engineering increment a
 - The existing PostgreSQL backup/restore proof failed because it hard-coded schema version 7 and a fixture payload with migration count 7. This was a stale test expectation caused by the additive migration, not a migration or restore failure.
 - Corrected tests/test_postgres_backup_restore.py to derive the expected version from the checked-in migration filenames, added PostgreSQL audit-insert failure rollback coverage, and made the documentation explicit about both-backend rollback testing.
 - The corrected exact-head CI run remains pending; no release pass is claimed until all jobs succeed.
+
+
+**Second CI correction note**
+- Second implementation run: https://github.com/soueilouay-creator/uneXxxx/actions/runs/45927751000
+- PostgreSQL 17 migration application and the existing custom-archive backup/restore read-back passed. The five existing PostgreSQL approval/recovery tests passed, as did four of the five PostgreSQL reconciliation tests and all seven SQLite reconciliation tests.
+- The additional PostgreSQL rollback-injection test failed before exercising application code: the test fixture's dollar-quoted PL/pgSQL body was altered by the psycopg query parser, producing invalid SQL.
+- Replaced that fixture body with a single-quoted SQL function body. The implementation transaction code was unchanged. The corrected exact-head CI run is pending.

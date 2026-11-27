@@ -231,11 +231,17 @@ class PostgresWorkflowReconciliationTests(unittest.TestCase):
         first = self.store.record_workflow_reconciliation_block(**request)
         second = self.store.record_workflow_reconciliation_block(**request)
         stale = self.store.record_workflow_reconciliation_block(**self._request(
-            reconciliation_id="reconcile-pg-stale-" + uuid.uuid4().hex
+            reconciliation_id="reconcile-pg-stale-" + uuid.uuid4().hex,
+            expected_checkpoint_revision=4,
+        ))
+        bad_attempt = self.store.record_workflow_reconciliation_block(**self._request(
+            reconciliation_id="reconcile-pg-bad-attempt-" + uuid.uuid4().hex,
+            expected_attempt_token_sha256="d" * 64,
         ))
         self.assertTrue(first["recorded"])
         self.assertTrue(second["idempotent_replay"])
         self.assertFalse(stale["recorded"])
+        self.assertFalse(bad_attempt["recorded"])
         self.assertEqual(len(self.store.list_workflow_reconciliation_events(self.workflow_id)), 1)
 
     def test_postgres_concurrent_connections_have_one_compare_and_set_winner(self):
@@ -253,6 +259,34 @@ class PostgresWorkflowReconciliationTests(unittest.TestCase):
         self.assertEqual(len(self.store.list_workflow_reconciliation_events(self.workflow_id)), 1)
         self.assertEqual(self.store.get_workflow_checkpoint(self.workflow_id)["status"], "blocked")
         self.assertEqual(self.store.list_workflow_stages(self.workflow_id)[0]["status"], "interrupted")
+
+    def test_postgres_audit_insert_failure_rolls_back_stage_and_checkpoint(self):
+        suffix = uuid.uuid4().hex
+        trigger_name = "fail_reconciliation_insert_" + suffix
+        function_name = "fail_reconciliation_insert_fn_" + suffix
+        with self.store._session() as connection:
+            connection.execute(
+                f"CREATE FUNCTION {function_name}() RETURNS trigger LANGUAGE plpgsql "
+                "AS $ BEGIN RAISE EXCEPTION 'synthetic audit insert failure'; END; $"
+            )
+            connection.execute(
+                f"CREATE TRIGGER {trigger_name} BEFORE INSERT ON workflow_reconciliation_events "
+                f"FOR EACH ROW WHEN (NEW.workflow_id = '{self.workflow_id}') "
+                f"EXECUTE FUNCTION {function_name}()"
+            )
+        try:
+            with self.assertRaises(Exception):
+                self.store.record_workflow_reconciliation_block(**self._request())
+        finally:
+            with self.store._session() as connection:
+                connection.execute(
+                    f"DROP TRIGGER {trigger_name} ON workflow_reconciliation_events"
+                )
+                connection.execute(f"DROP FUNCTION {function_name}()")
+        self.assertEqual(self.store.get_workflow_checkpoint(self.workflow_id)["status"], "running")
+        self.assertEqual(self.store.get_workflow_checkpoint(self.workflow_id)["revision"], 0)
+        self.assertEqual(self.store.list_workflow_stages(self.workflow_id)[0]["status"], "started")
+        self.assertEqual(self.store.list_workflow_reconciliation_events(self.workflow_id), [])
 
     def test_postgres_audit_event_rejects_update_and_delete(self):
         self.store.record_workflow_reconciliation_block(**self._request())

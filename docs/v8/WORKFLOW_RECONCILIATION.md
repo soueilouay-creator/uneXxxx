@@ -58,6 +58,6 @@ Database triggers reject event updates and deletes. `list_workflow_reconciliatio
 
 ## Verification
 
-CI exercises SQLite and PostgreSQL 16/17 with synthetic records only: compare-and-set, stale revision rejection, stage fingerprint mismatch, duplicate-event idempotency, concurrent operators, immutable-event triggers, transaction rollback on audit insertion failure, and read-back after reopening the store.
+CI exercises SQLite and PostgreSQL 16/17 with synthetic records only: compare-and-set, stale revision rejection, stage fingerprint mismatch, duplicate-event idempotency, concurrent operators, immutable-event triggers, transaction rollback on audit insertion failure in both backends, and read-back after reopening the store.
 
 No hosted database migration or live user-data operation is part of this increment.

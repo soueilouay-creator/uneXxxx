@@ -66,6 +66,10 @@ class PostgreSQLBackupRestoreDrillTests(unittest.TestCase):
         source_dsn = make_conninfo(self.dsn, dbname=source_name)
         target_dsn = make_conninfo(self.dsn, dbname=target_name)
         created_databases = []
+        expected_migration_version = max(
+            int(path.name.split("_", 1)[0])
+            for path in (ROOT / "migrations").glob("*.sql")
+        )
         with tempfile.TemporaryDirectory(prefix="unexpected-pg-backup-") as directory:
             archive = Path(directory) / "runtime.dump"
             try:
@@ -102,7 +106,8 @@ class PostgreSQLBackupRestoreDrillTests(unittest.TestCase):
                     )
                     source.execute(
                         "INSERT INTO backup_restore_probe(probe_id,marker,payload) VALUES(%s,%s,%s::jsonb)",
-                        ("restore-readback", "v8-restore-ok", '{"migrations":7,"preserved":true}'),
+                        ("restore-readback", "v8-restore-ok",
+                         f'{{"migrations":{expected_migration_version},"preserved":true}}'),
                     )
 
                 env, source_db = _libpq_env(source_dsn)
@@ -149,7 +154,7 @@ class PostgreSQLBackupRestoreDrillTests(unittest.TestCase):
                 self.assertEqual(table_counts(target_dsn), table_counts(source_dsn))
                 with psycopg.connect(target_dsn) as restored_db:
                     self.assertEqual(restored_db.execute(
-                        "SELECT max(version) FROM schema_migrations").fetchone()[0], 7)
+                        "SELECT max(version) FROM schema_migrations").fetchone()[0], expected_migration_version)
                     self.assertEqual(restored_db.execute(
                         "SELECT payload_json,result_json FROM tasks WHERE task_id=%s",
                         ("backup-restore-task",)).fetchone(),
@@ -164,7 +169,8 @@ class PostgreSQLBackupRestoreDrillTests(unittest.TestCase):
                         ('{"memory":"retained"}',))
                     self.assertEqual(restored_db.execute(
                         "SELECT marker,payload = %s::jsonb FROM backup_restore_probe WHERE probe_id=%s",
-                        ('{"migrations": 7, "preserved": true}', "restore-readback")).fetchone(),
+                        (f'{{"migrations": {expected_migration_version}, "preserved": true}}',
+                         "restore-readback")).fetchone(),
                         ("v8-restore-ok", True))
                     self.assertEqual(restored_db.execute(
                         "SELECT action_digest FROM consumed_approvals WHERE approval_id=%s",

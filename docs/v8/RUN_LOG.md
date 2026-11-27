@@ -284,3 +284,11 @@ This file is append-only. Each entry records one bounded engineering increment a
 - No dependency, package, infrastructure or provider credit was added or used. GitHub Actions account-level billing remains unverified.
 - Hosted production database remains unavailable for a verified migration/restore rehearsal: the previous read-only Neon audit found all branches archived and no scheduled snapshot. This must be rechecked before any production migration.
 - Next: verify exact-head CI, then add authenticated operator visibility only after the runtime transport and identity boundary are independently verified.
+
+
+**CI correction note**
+- First implementation run: https://github.com/soueilouay-creator/uneXxxx/actions/runs/45927399721
+- PostgreSQL 17 applied migrations 001–008 successfully. All four initial PostgreSQL reconciliation tests and all seven SQLite reconciliation tests passed.
+- The existing PostgreSQL backup/restore proof failed because it hard-coded schema version 7 and a fixture payload with migration count 7. This was a stale test expectation caused by the additive migration, not a migration or restore failure.
+- Corrected tests/test_postgres_backup_restore.py to derive the expected version from the checked-in migration filenames, added PostgreSQL audit-insert failure rollback coverage, and made the documentation explicit about both-backend rollback testing.
+- The corrected exact-head CI run remains pending; no release pass is claimed until all jobs succeed.

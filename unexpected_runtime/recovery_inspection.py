@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from .workflow_reconciliation import attempt_token_sha256
+
 
 SCHEMA = "uneXpected.workflow-recovery-inspection/v1"
 
@@ -144,8 +146,13 @@ def inspect_workflow_recovery(store: Any, workflow_id: str) -> dict[str, Any]:
             "status": status if isinstance(status, str) else "unknown",
             "task_id": task_id if isinstance(task_id, str) else None,
             "task_status": task_status,
+            "stage_request_hash": row.get("request_hash") if isinstance(row.get("request_hash"), str) else None,
             "result_present": row.get("result") is not None,
             "attempt_token_present": bool(row.get("attempt_token")),
+            "attempt_token_sha256": (
+                attempt_token_sha256(row["attempt_token"])
+                if isinstance(row.get("attempt_token"), str) and row["attempt_token"] else None
+            ),
         })
 
     stage_keys = [item["stage_key"] for item in stages if item.get("stage_key")]

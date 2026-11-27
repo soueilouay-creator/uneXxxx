@@ -2,6 +2,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 import sqlite3, json, time, uuid
+from .workflow_reconciliation import attempt_token_sha256, validate_reconciliation_block_request, reconciliation_event_matches
 from contextlib import contextmanager
 
 class StateStore:
@@ -51,6 +52,35 @@ class StateStore:
             );
             CREATE INDEX IF NOT EXISTS idx_workflow_stage_checkpoints_status_updated
                 ON workflow_stage_checkpoints(status,updated_at);
+            CREATE TABLE IF NOT EXISTS workflow_reconciliation_events(
+                reconciliation_id TEXT PRIMARY KEY,
+                workflow_id TEXT NOT NULL,
+                stage_key TEXT NOT NULL,
+                checkpoint_revision_before INTEGER NOT NULL CHECK(checkpoint_revision_before>=0),
+                checkpoint_revision_after INTEGER NOT NULL CHECK(checkpoint_revision_after=checkpoint_revision_before+1),
+                stage_index INTEGER NOT NULL CHECK(stage_index>0),
+                stage_request_hash TEXT NOT NULL CHECK(length(stage_request_hash)=64 AND stage_request_hash NOT GLOB '*[^0-9a-f]*'),
+                attempt_token_sha256 TEXT NOT NULL CHECK(length(attempt_token_sha256)=64 AND attempt_token_sha256 NOT GLOB '*[^0-9a-f]*'),
+                stage_status_before TEXT NOT NULL CHECK(stage_status_before='started'),
+                stage_status_after TEXT NOT NULL CHECK(stage_status_after='interrupted'),
+                operator_id TEXT NOT NULL CHECK(length(trim(operator_id))>0),
+                reason_code TEXT NOT NULL CHECK(reason_code IN ('uncertain_external_effect','evidence_conflict','operator_hold')),
+                evidence_ref TEXT NOT NULL CHECK(length(trim(evidence_ref))>0),
+                evidence_sha256 TEXT NOT NULL CHECK(length(evidence_sha256)=64 AND evidence_sha256 NOT GLOB '*[^0-9a-f]*'),
+                disposition TEXT NOT NULL CHECK(disposition='blocked_for_manual_review'),
+                created_at REAL NOT NULL,
+                UNIQUE(workflow_id,stage_key,checkpoint_revision_before),
+                FOREIGN KEY(workflow_id,stage_key)
+                    REFERENCES workflow_stage_checkpoints(workflow_id,stage_key) ON DELETE RESTRICT
+            );
+            CREATE INDEX IF NOT EXISTS idx_workflow_reconciliation_events_workflow_created
+                ON workflow_reconciliation_events(workflow_id,created_at);
+            CREATE TRIGGER IF NOT EXISTS workflow_reconciliation_events_no_update
+                BEFORE UPDATE ON workflow_reconciliation_events
+                BEGIN SELECT RAISE(ABORT,'workflow_reconciliation_events is append-only'); END;
+            CREATE TRIGGER IF NOT EXISTS workflow_reconciliation_events_no_delete
+                BEFORE DELETE ON workflow_reconciliation_events
+                BEGIN SELECT RAISE(ABORT,'workflow_reconciliation_events is append-only'); END;
             CREATE TABLE IF NOT EXISTS approval_execution_intents(
                 intent_id TEXT PRIMARY KEY,
                 task_id TEXT NOT NULL UNIQUE,
@@ -363,6 +393,117 @@ class StateStore:
                 (workflow_id,),
             ).fetchall()
         return [self._decode_workflow_stage(row) for row in rows]
+
+    def record_workflow_reconciliation_block(
+        self, *, reconciliation_id: str, workflow_id: str, stage_key: str,
+        expected_checkpoint_revision: int, expected_stage_index: int,
+        expected_stage_request_hash: str, expected_attempt_token_sha256: str,
+        operator_id: str, reason_code: str, evidence_ref: str, evidence_sha256: str,
+    ) -> dict[str, Any]:
+        record = validate_reconciliation_block_request(
+            reconciliation_id=reconciliation_id, workflow_id=workflow_id, stage_key=stage_key,
+            expected_checkpoint_revision=expected_checkpoint_revision,
+            expected_stage_index=expected_stage_index,
+            expected_stage_request_hash=expected_stage_request_hash,
+            expected_attempt_token_sha256=expected_attempt_token_sha256,
+            operator_id=operator_id, reason_code=reason_code,
+            evidence_ref=evidence_ref, evidence_sha256=evidence_sha256,
+        )
+        now = time.time()
+        with self._session() as c:
+            # Serialize SQLite writers before reading either revision or stage identity.
+            c.execute("BEGIN IMMEDIATE")
+            existing = c.execute(
+                "SELECT * FROM workflow_reconciliation_events WHERE reconciliation_id=?",
+                (reconciliation_id,),
+            ).fetchone()
+            if existing:
+                event = dict(existing)
+                if not reconciliation_event_matches(event, record):
+                    raise ValueError("reconciliation_id is already bound to a different immutable event.")
+                return {"recorded": False, "idempotent_replay": True, "event": event}
+
+            stage = c.execute(
+                "SELECT * FROM workflow_stage_checkpoints WHERE workflow_id=? AND stage_key=?",
+                (workflow_id, stage_key),
+            ).fetchone()
+            checkpoint = c.execute(
+                "SELECT revision,status FROM workflow_checkpoints WHERE workflow_id=?",
+                (workflow_id,),
+            ).fetchone()
+            if not stage or not checkpoint:
+                return {"recorded": False, "idempotent_replay": False, "reason": "stale_or_mismatched"}
+            if (int(checkpoint["revision"]) != expected_checkpoint_revision
+                    or checkpoint["status"] not in {"running", "interrupted"}
+                    or stage["status"] != "started"
+                    or int(stage["stage_index"]) != expected_stage_index
+                    or stage["request_hash"] != expected_stage_request_hash
+                    or attempt_token_sha256(stage["attempt_token"]) != expected_attempt_token_sha256):
+                return {"recorded": False, "idempotent_replay": False, "reason": "stale_or_mismatched"}
+
+            stage_update = c.execute(
+                "UPDATE workflow_stage_checkpoints SET status='interrupted',updated_at=? "
+                "WHERE workflow_id=? AND stage_key=? AND status='started' AND stage_index=? "
+                "AND request_hash=? AND attempt_token=?",
+                (now, workflow_id, stage_key, expected_stage_index,
+                 expected_stage_request_hash, stage["attempt_token"]),
+            )
+            if stage_update.rowcount != 1:
+                return {"recorded": False, "idempotent_replay": False, "reason": "stale_or_mismatched"}
+
+            checkpoint_update = c.execute(
+                "UPDATE workflow_checkpoints SET status='blocked',revision=revision+1,updated_at=? "
+                "WHERE workflow_id=? AND revision=? AND status IN ('running','interrupted')",
+                (now, workflow_id, expected_checkpoint_revision),
+            )
+            if checkpoint_update.rowcount != 1:
+                raise RuntimeError("Workflow checkpoint compare-and-set failed; reconciliation was rolled back.")
+
+            values = dict(record)
+            values["checkpoint_revision_after"] = expected_checkpoint_revision + 1
+            values["created_at"] = now
+            c.execute(
+                "INSERT INTO workflow_reconciliation_events("
+                "reconciliation_id,workflow_id,stage_key,checkpoint_revision_before,checkpoint_revision_after,"
+                "stage_index,stage_request_hash,attempt_token_sha256,stage_status_before,stage_status_after,"
+                "operator_id,reason_code,evidence_ref,evidence_sha256,disposition,created_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                tuple(values[key] for key in (
+                    "reconciliation_id","workflow_id","stage_key","checkpoint_revision_before",
+                    "checkpoint_revision_after","stage_index","stage_request_hash","attempt_token_sha256",
+                    "stage_status_before","stage_status_after","operator_id","reason_code",
+                    "evidence_ref","evidence_sha256","disposition","created_at",
+                )),
+            )
+            event_row = c.execute(
+                "SELECT * FROM workflow_reconciliation_events WHERE reconciliation_id=?",
+                (reconciliation_id,),
+            ).fetchone()
+            checkpoint_after = c.execute(
+                "SELECT status,revision FROM workflow_checkpoints WHERE workflow_id=?",
+                (workflow_id,),
+            ).fetchone()
+            if not event_row or not checkpoint_after:
+                raise RuntimeError("Workflow reconciliation read-back failed; transaction was rolled back.")
+            return {
+                "recorded": True,
+                "idempotent_replay": False,
+                "event": dict(event_row),
+                "checkpoint": dict(checkpoint_after),
+            }
+
+    def list_workflow_reconciliation_events(self, workflow_id: str, limit: int = 100):
+        if not isinstance(workflow_id, str) or not workflow_id.strip():
+            raise ValueError("workflow_id must be a non-empty string.")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 500:
+            raise ValueError("limit must be an integer between 1 and 500.")
+        with self._session() as c:
+            rows = c.execute(
+                "SELECT * FROM workflow_reconciliation_events WHERE workflow_id=? "
+                "ORDER BY created_at,reconciliation_id LIMIT ?",
+                (workflow_id, limit),
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     _WORKFLOW_STAGE_APPROVAL_TRANSITIONS = {
         "awaiting_approval": {"approved", "blocked"},

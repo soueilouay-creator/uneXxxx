@@ -247,3 +247,40 @@ This file is append-only. Each entry records one bounded engineering increment a
 - This helper is diagnostic only. There is still no supported, revision-checked operator transition to reconcile an ambiguous started stage.
 - Next: finish the renderer CI result, then design an append-only reconciliation audit record and compare-and-set transition with SQLite/PostgreSQL parity tests. Do not apply a production migration until an active authorized database and independent backup/read-back are verified.
 
+
+
+## Run 17 — 2026-11-27 — revision-checked manual-review block
+
+**Phase:** Phase 3, durable execution and operator recovery.
+
+**Baseline and rollback**
+- Re-verified core default branch `main` at `2828fe281b60ea0a343b24973b411bbad650e93e`.
+- Reused open draft PR #19 and branch `upgrade/v8-recovery-inspection-20261126`, whose starting head was `5711458b2450aa7478972eea532b9733ef0b0147`.
+- Created rollback branch `backup/v8-core-pre-reconciliation-20261127` at that exact pre-change feature head.
+- Studio repository was rechecked separately; no Studio files were changed in this run.
+
+**Completed**
+- Added `unexpected_runtime/workflow_reconciliation.py` for bounded request validation, attempt-token fingerprints and immutable event matching.
+- Added `record_workflow_reconciliation_block()` and read-only event listing to both SQLite `StateStore` and PostgreSQL `PostgresStateStore`.
+- Added `migrations/008_workflow_reconciliation_events.sql`; SQLite initialization adds the equivalent table and append-only triggers without a schema-version bump.
+- Extended recovery inspection with the stage request hash and a SHA-256 attempt fingerprint; the raw token remains hidden.
+- Added `tests/test_workflow_reconciliation.py` for both backends.
+- Added the PostgreSQL reconciliation suite to the PostgreSQL 17 release-proof CI command.
+- Added `docs/v8/WORKFLOW_RECONCILIATION.md`.
+- Updated the changed-file SHA-256 inventory.
+
+**Safety semantics**
+- Only a still-`started` stage with matching checkpoint revision, stage index, stage request hash and attempt-token fingerprint can be blocked.
+- The stage changes to `interrupted`; the checkpoint changes to `blocked` with a revision increment. The original attempt token, stage result, task records and approval records are not rewritten.
+- The event is appended atomically and database triggers reject updates/deletes.
+- This is a manual-review block, not an external-effect success/failure decision and not an automatic recovery/replay path.
+- The method is not exposed through HTTP, CLI, scheduler or UI. The operator identifier is recorded but not authenticated by this storage layer; future API exposure requires authentication and explicit human confirmation.
+
+**Verification**
+- CI result pending for the new implementation commit. No pass is claimed until the SQLite suite, PostgreSQL 16/17 suites, migration-preservation step and renderer E2E all complete on the new commit.
+- No hosted PostgreSQL migration, production database access, provider API request, user-data operation or deployment was performed.
+
+**Costs and blockers**
+- No dependency, package, infrastructure or provider credit was added or used. GitHub Actions account-level billing remains unverified.
+- Hosted production database remains unavailable for a verified migration/restore rehearsal: the previous read-only Neon audit found all branches archived and no scheduled snapshot. This must be rechecked before any production migration.
+- Next: verify exact-head CI, then add authenticated operator visibility only after the runtime transport and identity boundary are independently verified.

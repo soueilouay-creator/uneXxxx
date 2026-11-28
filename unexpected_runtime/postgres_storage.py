@@ -7,6 +7,7 @@ from .postgres_idempotency import PostgresIdempotencyMixin
 import json
 import time
 import uuid
+from .workflow_reconciliation import attempt_token_sha256, validate_reconciliation_block_request, reconciliation_event_matches
 
 
 class PostgresStorageError(RuntimeError):
@@ -361,6 +362,140 @@ class PostgresStateStore(PostgresIdempotencyMixin):
                 (workflow_id,),
             ).fetchall()
         return [self._decode_workflow_stage(row) for row in rows]
+
+    @staticmethod
+    def _require_workflow_reconciliation_schema(connection):
+        row = connection.execute(
+            "SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1"
+        ).fetchone()
+        if not row or int(row["version"]) < 8:
+            raise PostgresStorageError(
+                "PostgreSQL workflow reconciliation requires additive migration 008."
+            )
+
+    def record_workflow_reconciliation_block(
+        self, *, reconciliation_id: str, workflow_id: str, stage_key: str,
+        expected_checkpoint_revision: int, expected_stage_index: int,
+        expected_stage_request_hash: str, expected_attempt_token_sha256: str,
+        operator_id: str, reason_code: str, evidence_ref: str, evidence_sha256: str,
+    ) -> dict[str, Any]:
+        record = validate_reconciliation_block_request(
+            reconciliation_id=reconciliation_id, workflow_id=workflow_id, stage_key=stage_key,
+            expected_checkpoint_revision=expected_checkpoint_revision,
+            expected_stage_index=expected_stage_index,
+            expected_stage_request_hash=expected_stage_request_hash,
+            expected_attempt_token_sha256=expected_attempt_token_sha256,
+            operator_id=operator_id, reason_code=reason_code,
+            evidence_ref=evidence_ref, evidence_sha256=evidence_sha256,
+        )
+        now = time.time()
+        with self._session() as connection:
+            self._require_workflow_reconciliation_schema(connection)
+
+            def existing_response():
+                existing = connection.execute(
+                    "SELECT * FROM workflow_reconciliation_events WHERE reconciliation_id=%s",
+                    (reconciliation_id,),
+                ).fetchone()
+                if not existing:
+                    return None
+                event = dict(existing)
+                if not reconciliation_event_matches(event, record):
+                    raise ValueError("reconciliation_id is already bound to a different immutable event.")
+                return {"recorded": False, "idempotent_replay": True, "event": event}
+
+            replay = existing_response()
+            if replay:
+                return replay
+
+            # Lock the stage first so a late complete_workflow_stage cannot win after
+            # this operator block. Then lock the parent checkpoint for its CAS revision.
+            stage = connection.execute(
+                "SELECT * FROM workflow_stage_checkpoints "
+                "WHERE workflow_id=%s AND stage_key=%s FOR UPDATE",
+                (workflow_id, stage_key),
+            ).fetchone()
+            checkpoint = connection.execute(
+                "SELECT revision,status FROM workflow_checkpoints WHERE workflow_id=%s FOR UPDATE",
+                (workflow_id,),
+            ).fetchone()
+            if not stage or not checkpoint:
+                replay = existing_response()
+                return replay or {"recorded": False, "idempotent_replay": False, "reason": "stale_or_mismatched"}
+            if (int(checkpoint["revision"]) != expected_checkpoint_revision
+                    or checkpoint["status"] not in {"running", "interrupted"}
+                    or stage["status"] != "started"
+                    or int(stage["stage_index"]) != expected_stage_index
+                    or stage["request_hash"] != expected_stage_request_hash
+                    or attempt_token_sha256(stage["attempt_token"]) != expected_attempt_token_sha256):
+                replay = existing_response()
+                return replay or {"recorded": False, "idempotent_replay": False, "reason": "stale_or_mismatched"}
+
+            stage_update = connection.execute(
+                "UPDATE workflow_stage_checkpoints SET status='interrupted',updated_at=%s "
+                "WHERE workflow_id=%s AND stage_key=%s AND status='started' AND stage_index=%s "
+                "AND request_hash=%s AND attempt_token=%s",
+                (now, workflow_id, stage_key, expected_stage_index,
+                 expected_stage_request_hash, stage["attempt_token"]),
+            )
+            if stage_update.rowcount != 1:
+                replay = existing_response()
+                return replay or {"recorded": False, "idempotent_replay": False, "reason": "stale_or_mismatched"}
+
+            checkpoint_update = connection.execute(
+                "UPDATE workflow_checkpoints SET status='blocked',revision=revision+1,updated_at=%s "
+                "WHERE workflow_id=%s AND revision=%s AND status IN ('running','interrupted')",
+                (now, workflow_id, expected_checkpoint_revision),
+            )
+            if checkpoint_update.rowcount != 1:
+                raise RuntimeError("Workflow checkpoint compare-and-set failed; reconciliation was rolled back.")
+
+            values = dict(record)
+            values["checkpoint_revision_after"] = expected_checkpoint_revision + 1
+            values["created_at"] = now
+            connection.execute(
+                "INSERT INTO workflow_reconciliation_events("
+                "reconciliation_id,workflow_id,stage_key,checkpoint_revision_before,checkpoint_revision_after,"
+                "stage_index,stage_request_hash,attempt_token_sha256,stage_status_before,stage_status_after,"
+                "operator_id,reason_code,evidence_ref,evidence_sha256,disposition,created_at) "
+                "VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                tuple(values[key] for key in (
+                    "reconciliation_id","workflow_id","stage_key","checkpoint_revision_before",
+                    "checkpoint_revision_after","stage_index","stage_request_hash","attempt_token_sha256",
+                    "stage_status_before","stage_status_after","operator_id","reason_code",
+                    "evidence_ref","evidence_sha256","disposition","created_at",
+                )),
+            )
+            event_row = connection.execute(
+                "SELECT * FROM workflow_reconciliation_events WHERE reconciliation_id=%s",
+                (reconciliation_id,),
+            ).fetchone()
+            checkpoint_after = connection.execute(
+                "SELECT status,revision FROM workflow_checkpoints WHERE workflow_id=%s",
+                (workflow_id,),
+            ).fetchone()
+            if not event_row or not checkpoint_after:
+                raise RuntimeError("Workflow reconciliation read-back failed; transaction was rolled back.")
+            return {
+                "recorded": True,
+                "idempotent_replay": False,
+                "event": dict(event_row),
+                "checkpoint": dict(checkpoint_after),
+            }
+
+    def list_workflow_reconciliation_events(self, workflow_id: str, limit: int = 100):
+        if not isinstance(workflow_id, str) or not workflow_id.strip():
+            raise ValueError("workflow_id must be a non-empty string.")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 500:
+            raise ValueError("limit must be an integer between 1 and 500.")
+        with self._session() as connection:
+            self._require_workflow_reconciliation_schema(connection)
+            rows = connection.execute(
+                "SELECT * FROM workflow_reconciliation_events WHERE workflow_id=%s "
+                "ORDER BY created_at,reconciliation_id LIMIT %s",
+                (workflow_id, limit),
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     _WORKFLOW_STAGE_APPROVAL_TRANSITIONS = {
         "awaiting_approval": {"approved", "blocked"},

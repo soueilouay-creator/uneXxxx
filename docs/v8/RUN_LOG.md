@@ -314,3 +314,38 @@ This file is append-only. Each entry records one bounded engineering increment a
 **Outstanding V8 release blockers remain:** no active hosted PostgreSQL branch/Render Postgres or verified production backup/restore path; no live OpenAI/Anthropic/third-provider compatibility proof; authenticated operator API/UI not wired; full MCP threat/security gate, model/tool observability and evaluation, engineering sandbox, and end-to-end product-data preservation audit remain incomplete.
 
 **Next increment:** add an authenticated, read-only operator view for workflow reconciliation events only after verifying the actual hosted runtime transport and identity boundary. Keep state-changing reconciliation controls unavailable until explicit human approval and worker-isolation evidence are enforceable.
+
+
+## Run 18 — 2026-11-28 — Hosted runtime endpoint and authentication boundary audit
+
+**Phase:** Phase 3, durable execution and hosted-runtime integration boundary.
+
+**Baseline and rollback**
+- Re-verified core `main` at `2828fe281b60ea0a343b24973b411bbad650e93e`.
+- Resumed draft PR #19 on `upgrade/v8-recovery-inspection-20261126` at `d2568c181c81e5538c12a344b399c94783bd2f9a`; it remains open, unmerged and not deployed.
+- Created rollback branch `backup/v8-core-pre-hosted-runtime-audit-20261128` at the exact pre-change feature head `d2568c181c81e5538c12a344b399c94783bd2f9a`.
+- Re-verified Studio `main` at `6f5bc823e1ffd9284abae7dbbb6c1dae97ebf90b`; no Studio file was changed.
+
+**Completed**
+- Added `docs/v8/HOSTED_RUNTIME_ENDPOINT_AUDIT.md` with the live Render service inventory, deployed commit, source-level HTTP/MCP transport contract, shared bearer-token boundary, storage-selection uncertainty, live-probe limitation and explicit no-integration decision.
+- Confirmed the Render command-center service is configured on the public HTTPS Render hostname with `/health`, auto-deploy off, Free plan and a single Frankfurt instance. Its latest live deployment is commit `8a67c823292901305cad670a60c2f24f0a047267`, older than current core `main` and PR #19.
+- Confirmed the separate V7.3.1 test service is not the V8 command center; the Studio service still has auto-deploy enabled; no Render PostgreSQL instances are listed.
+- Inspected the deployed source at its exact deployed SHA: `/v1/*` and `/mcp` use one shared bearer token; `/health` is public; the token check requires at least 32 ASCII characters and uses constant-time comparison. The MCP app is stateless Streamable HTTP with DNS-rebinding protection and an exact-host allowlist.
+- Confirmed the source defaults to SQLite unless PostgreSQL is explicitly selected by environment. Render did not expose environment-variable values, so the actual token presence and storage backend remain unverified.
+- Attempted only read-only live GET probes. DNS resolution failed in the execution container before HTTP; the web fetcher could not access the URL; Render request/application logs and service events were empty for 2026-11-21 through 2026-11-28. This does not establish that the host is down.
+
+**Decision**
+- No HTTP route or Studio client was added. A single shared bearer token currently authorizes both read and write-capable routes, so it is not a least-privilege credential for a read-only operator panel.
+- Keep hosted runtime separate until live TLS/HTTP, unauthenticated rejection, approved authenticated status, MCP transport, actual storage persistence and a distinct read-only scope are verified.
+- No environment variable, credential, service setting, deployment, DNS record or database was changed.
+
+**Preservation and cost**
+- Documentation-only changes plus checksum inventory. No tracked source, migration, user data, PWA, provider, approval, memory, deployment or integration was changed.
+- No new dependency, infrastructure, paid trial, subscription, provider call or API credit. GitHub Actions billing and Render account-level usage are not visible.
+
+**Verification**
+- This audit records repository, Render control-plane and deployed-source evidence. The live endpoint probe is explicitly blocked by DNS/network access; no live HTTP status or TLS handshake is claimed.
+- Exact-head CI for this documentation/checksum commit is pending and will be recorded after completion.
+
+**Next**
+- Obtain a non-secret live TLS/HTTP probe from an approved network path, verify the configured storage backend and backup posture, then design a separate read-only operator identity. Do not deploy or merge as part of this audit.

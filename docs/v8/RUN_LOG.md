@@ -349,3 +349,14 @@ This file is append-only. Each entry records one bounded engineering increment a
 
 **Next**
 - Obtain a non-secret live TLS/HTTP probe from an approved network path, verify the configured storage backend and backup posture, then design a separate read-only operator identity. Do not deploy or merge as part of this audit.
+
+
+### Run 18 exact-head CI closure — implementation/documentation commit 8a44ea388b932b6cd65d56c2d5d47adf27d14d7d
+
+GitHub Actions [run #46098339623](https://github.com/soueilouay-creator/uneXxxx/actions/runs/46098339623) completed successfully on the exact branch head `8a44ea388b932b6cd65d56c2d5d47adf27d14d7d`. All three jobs concluded success:
+
+- **runtime-tests:** `python -m unittest discover -s tests -v` — 462 tests, 3 skipped, 0 failures (82.293 seconds). Runtime compilation, command-center JavaScript syntax, workflow YAML/Bash validation, resource/scenario contracts, additive migration preservation, source-integrity fixture, changed-file SHA-256 inventory, Docker build, actual-container smoke test and CLI smoke tests all passed.
+- **postgres17-release-proof:** `python -m unittest tests.test_postgres_workflow_stage_approval tests.test_postgres_backup_restore tests.test_workflow_reconciliation -v` — 18 tests, 0 failures (3.325 seconds). Migrations 001–008, independent-connection approval/reconciliation concurrency, abrupt-process recovery, pause/resume, append-only audit protections, transaction rollback and custom-archive backup/restore read-back passed.
+- **renderer-e2e:** `docker build --pull -f renderer/Dockerfile -t unexpected-creator-renderer:locked .` followed by `python -m unittest tests.test_creator_end_to_end -v` — 2 tests, 0 failures (27.587 seconds). A real vertical MP4 was rendered with worker networking disabled. Renderer image ID: `sha256:91e11bbe3563f936f6c8694f12141c4695a2530bb554240af25f1dc29e3505f4`.
+
+The run also verified the changed-file SHA-256 inventory for 13 changed paths. The only follow-up after this tested commit is this documentation-only CI closure and its inventory digest; no executable source or tests changed after the successful run. PR #19 remains draft, open and unmerged; no production deployment or migration occurred.
